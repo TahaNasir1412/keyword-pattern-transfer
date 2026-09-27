@@ -122,6 +122,7 @@ footer{border-top:1px solid var(--line);margin-top:50px;padding:24px 0 60px;colo
       <div class="row r2">
         <div><label for="prov">Who answers</label>
           <select id="prov">
+            <option value="auto">Detect automatically — recommended</option>
             <option value="claude">Claude, inside this chat — no key needed</option>
             <option value="server">My Vercel server key — Groq, Gemini or any OpenAI-compatible</option>
             <option value="own">Gemini with a key I paste below</option>
@@ -276,61 +277,77 @@ function metrics(){el('mKw').textContent=S.kw;el('mCall').textContent=S.calls;el
   el('mTime').textContent=S.t0?Math.round((Date.now()-S.t0)/1000)+'s':'0s';}
 setInterval(()=>{if(S.t0)metrics();},1000);
 
-['model','city','state','delay','maxtok'].forEach(k=>{const v=localStorage.getItem('pt_'+k);
+['model','city','state','delay','maxtok','srvModel'].forEach(k=>{const v=localStorage.getItem('pt_'+k);
   if(v)el(k).value=v;el(k).addEventListener('change',()=>localStorage.setItem('pt_'+k,el(k).value));});
 
-/* ---- providers ---- */
-S.mode='claude';
+/* ---- providers: resolve a working transport, do not interrogate the user ---- */
+S.mode='auto';
 function showSrv(cls, html){ el('srv').className='note'+(cls?' '+cls:''); el('srv').innerHTML=html; }
+
 const MODEL_DEFAULTS={groq:'llama-3.3-70b-versatile',gemini:'gemini-3.5-flash-lite',openai:''};
+
 function syncProv(){
-  const p = el('prov').value;
-  el('keyRow').style.display = (p==='own') ? '' : 'none';
-  el('srvRow').style.display = (p==='server') ? '' : 'none';
-  el('delay').value = (p==='claude') ? 400 : (p==='server' && el('srvProv').value==='groq') ? 2200 : 4500;
-  if(p==='own' && !el('model').value.trim()) el('model').value='gemini-3.5-flash-lite';
+  const p=el('prov').value;
+  el('keyRow').style.display=(p==='own')?'':'none';
+  el('srvRow').style.display=(p==='server')?'':'none';
 }
+el('prov').addEventListener('change',()=>{syncProv();probe(true);});
 el('srvProv').addEventListener('change',()=>{
   const v=el('srvProv').value;
-  if(v && MODEL_DEFAULTS[v]!==undefined && !el('srvModel').value.trim()) el('srvModel').value=MODEL_DEFAULTS[v];
-  el('delay').value = (v==='groq') ? 2200 : 4500;
-  probe();
+  if(v&&MODEL_DEFAULTS[v]!==undefined&&!el('srvModel').value.trim())el('srvModel').value=MODEL_DEFAULTS[v];
+  probe(true);
 });
-el('prov').addEventListener('change', ()=>{ syncProv(); probe(); });
+
+/* ask the serverless function what it has. returns null if it is not there. */
+async function serverInfo(){
+  try{
+    const r=await fetch('/api/generate',{method:'GET',headers:{'Accept':'application/json'}});
+    const raw=await r.text();
+    let d=null; try{ d=JSON.parse(raw); }catch(e){}
+    if(d&&d.ok)return d;
+    return {notFunction:true,status:r.status,head:raw.slice(0,80).replace(/\s+/g,' ')};
+  }catch(e){ return {unreachable:true,message:e.message}; }
+}
+
+async function claudeWorks(){
+  try{
+    const r=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,
+        messages:[{role:'user',content:'Reply with exactly {"ok":true}'}]})});
+    if(!r.ok)return false;
+    const d=await r.json();
+    return Boolean((d.content||[]).map(x=>x.text||'').join(''));
+  }catch(e){ return false; }
+}
+
+function useServer(info,loud){
+  const have=Object.keys(info.keys||{}).filter(k=>info.keys[k]);
+  let want=el('srvProv').value;
+  if(!want||!have.includes(want)){ want=have[0]||''; el('srvProv').value=want; }
+  if(want&&!el('srvModel').value.trim()&&MODEL_DEFAULTS[want]!==undefined)
+    el('srvModel').value=MODEL_DEFAULTS[want];
+  el('delay').value=(want==='groq')?2200:4500;
+  S.mode='server';
+  const warn=(want==='gemini'&&/flash$/i.test(el('srvModel').value.trim()))
+    ? '<br><br><b>Careful.</b> Gemini Flash allows only about 20 requests a day on the free tier and one run makes roughly 35. Change the model to <span class="mono">gemini-3.5-flash-lite</span>.'
+    : '';
+  showSrv('','<b>Ready.</b> Using your server key: <b>'+esc(want||'unknown')+'</b>'
+    +(el('srvModel').value.trim()?' with <span class="mono">'+esc(el('srvModel').value.trim())+'</span>':'')
+    +'. Nothing else to set up.'+warn);
+  if(loud)log('Connection: server key ('+want+'). Ready to run.','ok');
+  return 'server';
+}
 
 async function probe(loud){
-  const p = el('prov').value;
-  S.mode = p;
+  const choice=el('prov').value;
 
-  if(p==='claude'){
-    try{
-      const r = await fetch('https://api.anthropic.com/v1/messages',{
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({model:'claude-sonnet-4-6', max_tokens:1000,
-          messages:[{role:'user', content:'Reply with exactly this and nothing else: {"ok":true}'}]})
-      });
-      if(!r.ok) throw new Error('HTTP '+r.status);
-      const d = await r.json();
-      const t = (d.content||[]).map(i=>i.text||'').join('');
-      if(!t) throw new Error('empty reply');
-      showSrv('', '<b>Connected to Claude.</b> No key needed. This works inside the Claude preview only. '
-        + 'When you deploy to Vercel, switch this to one of the Gemini options.');
-      if(loud) log('Connection: Claude, in this chat. Ready to run.','ok');
-      return 'claude';
-    }catch(e){
-      S.mode='none';
-      showSrv('bad','<b>Claude is not reachable from this view.</b> '+esc(e.message)
-        +'<br><br>This option only works when the tool is open inside the Claude preview. '
-        +'If you are on Vercel or a local file, pick one of the Gemini options instead.');
-      if(loud) log('Connection: Claude unreachable. '+e.message,'er');
-      return 'none';
-    }
-  }
-
-  if(p==='own'){
+  /* explicit: user pasted a key */
+  if(choice==='own'){
     if(el('key').value.trim()){
-      showSrv('', '<b>Ready.</b> Using the key you pasted. Calls go straight from this browser to Google.');
-      if(loud) log('Connection: your own Gemini key. Ready to run.','ok');
+      S.mode='own';
+      showSrv('','<b>Ready.</b> Using the key you pasted, sent straight from this browser to Google.');
+      if(loud)log('Connection: your own Gemini key.','ok');
       return 'own';
     }
     S.mode='none';
@@ -338,53 +355,63 @@ async function probe(loud){
     return 'none';
   }
 
-  let status='no response', ctype='', head='';
-  try{
-    const r = await fetch('/api/generate',{method:'GET',headers:{'Accept':'application/json'}});
-    status=r.status; ctype=r.headers.get('content-type')||'';
-    const raw = await r.text(); head = raw.slice(0,90).replace(/\s+/g,' ');
-    let d=null; try{ d=JSON.parse(raw); }catch(e){}
-    if(d && d.ok && d.hasKey){
-      const have=Object.keys(d.keys||{}).filter(k=>d.keys[k]);
-      const want=el('srvProv').value;
-      if(want && !have.includes(want)){
-        S.mode='none';
-        showSrv('bad','<b>'+esc(want)+' is not set on the server.</b> Keys found: '
-          +esc(have.join(', ')||'none')+'. Either pick one of those above, or add '
-          +'<span class="mono">'+esc(want.toUpperCase())+'_API_KEY</span> in Vercel and redeploy.');
-        return 'none';
-      }
-      showSrv('', '<b>Connected.</b> Server keys available: <b>'+esc(have.join(', '))+'</b>.'
-        + (have.includes('gemini') && !have.includes('groq')
-          ? '<br><br><b>Note on Gemini.</b> Flash models are capped at about 20 requests per day on the free tier and one run of this tool makes roughly 35. Use a Flash-Lite model name, or add a Groq key instead.'
-          : ''));
-      if(loud) log('Connection: server. Keys: '+have.join(', '),'ok');
-      return 'server';
+  /* explicit: Claude */
+  if(choice==='claude'){
+    if(await claudeWorks()){
+      S.mode='claude'; el('delay').value=400;
+      showSrv('','<b>Ready.</b> Answering with Claude, no key needed. This works inside the Claude preview only.');
+      if(loud)log('Connection: Claude in this chat.','ok');
+      return 'claude';
     }
     S.mode='none';
-    const why = (d && d.ok && !d.hasKey)
-      ? 'The function is running but <span class="mono">GEMINI_API_KEY</span> is not set. Add it in Vercel, then <b>redeploy</b>.'
-      : 'The request came back as a web page instead of JSON, so the function is not running. Either this file is open straight from your computer, or <span class="mono">api/generate.js</span> is missing from the deployed repo.';
-    showSrv('bad','<b>No server key available.</b> '+why
-      +'<br><br>For now, switch "Who answers" to <b>Claude</b> and it will just work.'
-      +'<br><br><span class="mono">HTTP '+status+' · '+esc(ctype||'no content-type')+' · '+esc(head)+'</span>');
-    if(loud) log('Connection: none. HTTP '+status+' · '+ctype+' · '+head,'er');
-    return 'none';
-  }catch(e){
-    S.mode='none';
-    showSrv('bad','<b>No server key available.</b> Could not reach <span class="mono">/api/generate</span> ('+esc(e.message)+').'
-      +'<br><br>Switch "Who answers" to <b>Claude</b> to run it here.');
-    if(loud) log('Connection: none. '+e.message,'er');
+    showSrv('bad','<b>Claude is not reachable here.</b> That is expected on Vercel or a local file. '
+      +'Switch <b>Who answers</b> back to <b>Detect automatically</b> and it will use your server key.');
     return 'none';
   }
+
+  /* explicit: server */
+  if(choice==='server'){
+    const info=await serverInfo();
+    if(info&&info.ok&&info.hasKey)return useServer(info,loud);
+    S.mode='none';
+    showSrv('bad', info&&info.ok
+      ? '<b>The function is running but no key is set.</b> Add <span class="mono">GROQ_API_KEY</span> in Vercel, Settings, Environment Variables, then <b>redeploy</b>.'
+      : '<b>The serverless function is not running.</b> Check that <span class="mono">api/generate.js</span> sits inside a folder called <span class="mono">api</span> in the repo, then redeploy.');
+    return 'none';
+  }
+
+  /* AUTO: server first, Claude second, then give up with a clear reason */
+  showSrv('','Checking your connection...');
+  const info=await serverInfo();
+  if(info&&info.ok&&info.hasKey){ el('prov').value='server'; syncProv(); return useServer(info,loud); }
+
+  if(await claudeWorks()){
+    el('prov').value='claude'; S.mode='claude'; el('delay').value=400; syncProv();
+    showSrv('','<b>Ready.</b> Answering with Claude, no key needed. Once this is on Vercel with a key, it will use that instead automatically.');
+    if(loud)log('Connection: Claude in this chat.','ok');
+    return 'claude';
+  }
+
+  S.mode='none';
+  el('prov').value='own'; syncProv();
+  showSrv('bad', (info&&info.ok&&!info.hasKey)
+    ? '<b>Your function is running but no API key is set.</b> In Vercel go to Settings, Environment '
+      +'Variables, add <span class="mono">GROQ_API_KEY</span>, then <b>redeploy</b>. Vercel does not '
+      +'apply a new variable to an existing build.'
+    : '<b>No connection found.</b> The serverless function did not respond, so either '
+      +'<span class="mono">api/generate.js</span> is missing from the <span class="mono">api</span> folder '
+      +'in your repo, or you are opening this file locally. You can paste a Gemini key below to run it anyway.');
+  if(loud)log('Connection: none.','er');
+  return 'none';
 }
+
 syncProv(); probe();
-el('key').addEventListener('input', ()=>{ clearTimeout(S._kt); S._kt=setTimeout(()=>probe(),400); });
-el('test').onclick = async (e)=>{
-  e.target.textContent='Testing...'; e.target.disabled=true;
-  const m = await probe(true);
-  e.target.textContent='Test connection'; e.target.disabled=false;
-  if(m==='none') el('srv').scrollIntoView({behavior:'smooth',block:'center'});
+el('key').addEventListener('input',()=>{clearTimeout(S._kt);S._kt=setTimeout(()=>probe(),400);});
+el('test').onclick=async(e)=>{
+  e.target.textContent='Testing...';e.target.disabled=true;
+  const m=await probe(true);
+  e.target.textContent='Test connection';e.target.disabled=false;
+  if(m==='none')el('srv').scrollIntoView({behavior:'smooth',block:'center'});
 };
 
 /* ---- evidence pages ---- */
@@ -493,7 +520,8 @@ function parseLoose(txt){
 /* ---- gemini with retry ---- */
 const TRUNC_HINT='\n\nIMPORTANT: your previous reply was cut off before the JSON closed. Return at most HALF as many items this time, and keep every string under 12 words. Completing the JSON matters more than covering everything.';
 async function gemini(prompt,label){
-  const prov=el('prov').value;
+  let prov=S.mode;
+  if(prov==='auto'||!prov){ prov=await probe(); }
   let p=prompt, wasTrunc=false;
   const model=el('model').value.trim()||'gemini-2.5-flash';
   const maxTokens=parseInt(el('maxtok').value,10)||16000;
@@ -816,6 +844,7 @@ ${evidenceBlock(90)}
 
 A. Count the supplied keywords per family: location, colloquial, urgency, brand, symptom,
 type_variant, cost, decision, question, parts, tenure_segment, proximity, competitor_brand.
+Return ONLY families with a count above zero. Omit the rest.
 
 B. BLIND SPOT AUDIT. Compare against this fuller map: the families above plus
 maintenance_prevention, installation_replacement, warranty_insurance, emergency_after_hours,
@@ -823,7 +852,8 @@ commercial_vs_residential, seasonal, diy_boundary.
 For each family with ZERO inherited keywords, mark "genuinely_absent" with a reason, or
 "likely_blind_spot". Never default to absent just because nothing was supplied. Give the autocomplete
 fragment to type and whether it should be retrofitted into the already published pages.
-At most 8 blind spots.${SCOPE(c)}${RULES}
+At most 6 blind spots. Keep reasoning under 12 words and skip families with a zero count
+in part A.${SCOPE(c)}${RULES}
 JSON: {"families":[{"family":"","count":0}],
 "blindSpots":[{"family":"","verdict":"likely_blind_spot","reasoning":"","autocompleteSeed":"","retrofitExisting":true}]}`;}
 
@@ -1064,9 +1094,10 @@ async function doRun(){
   if(mode==='none'){
     el('phase').textContent='Cannot run: no connection.';
     el('log').innerHTML='';
-    log('Nothing ran. There is no way to reach a model.','er');
-    log('Set "Who answers" to Claude at the top of this page, then press Run again.','er');
-    log('Claude needs no key and works inside this preview.','er');
+    log('Nothing ran. No working connection was found.','er');
+    log('If this is on Vercel: add GROQ_API_KEY under Settings, Environment Variables, then REDEPLOY.','er');
+    log('Vercel does not apply a new variable to a build that already exists.','er');
+    log('If this is the Claude preview: set "Who answers" to Claude.','er');
     el('srv').scrollIntoView({behavior:'smooth',block:'center'});return;
   }
   S.stop=false;S.fatal=null;S.calls=0;S.fails=0;S.kw=0;S.stages={};S.violations=[];S.filtered=[];S.t0=Date.now();
