@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pattern Transfer — Keyword Candidate Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#0F1C1A;--panel:#162523;--panel2:#1C2E2B;--line:#2B403C;--text:#D9E2DD;--dim:#8DA49E;
+ --bright:#F2F7F4;--signal:#E3A63C;--flow:#79B7AA;--warn:#D98A6B;--bad:#C96A5B;--r:3px;
+ box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--ink);color:var(--text);font-family:Archivo,"Helvetica Neue",Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6}
+.wrap{max-width:1140px;margin:0 auto;padding:0 20px}
+h1{font-size:clamp(26px,4vw,40px);margin:0 0 8px;font-weight:700;letter-spacing:-.02em;color:var(--bright)}
+h2{font-size:19px;margin:0 0 4px;font-weight:600;color:var(--bright)}
+h3{font-size:16px;margin:22px 0 8px;font-weight:600;color:var(--flow)}
+p{margin:0 0 12px}
+a{color:var(--signal)}
+header{border-bottom:1px solid var(--line);padding:38px 0 24px;background:radial-gradient(800px 260px at 12% -40%,rgba(227,166,60,.10),transparent 70%)}
+.sub{color:var(--flow);font-weight:500;margin:0 0 14px}
+.lede{color:var(--dim);max-width:72ch;margin:0 0 14px}
+.step{border:1px solid var(--line);background:var(--panel);margin:18px 0}
+.shead{display:flex;gap:14px;align-items:baseline;padding:15px 18px;border-bottom:1px solid var(--line)}
+.snum{font-family:"IBM Plex Mono",monospace;color:var(--signal);font-size:13px;font-weight:500;flex:none}
+.sdesc{color:var(--dim);font-size:13.5px;flex:1}
+.sbody{padding:18px}
+label{display:block;font-size:13px;color:var(--dim);margin:0 0 5px;font-weight:500}
+label .op{color:var(--flow);font-weight:400}
+input,textarea,select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:9px 11px;border-radius:var(--r);font-family:inherit;font-size:14px}
+textarea{font-family:"IBM Plex Mono",monospace;font-size:12.5px;line-height:1.55;resize:vertical;min-height:110px}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--signal)}
+.row{display:grid;gap:14px;margin-bottom:14px}
+.r3{grid-template-columns:repeat(3,1fr)}.r2{grid-template-columns:repeat(2,1fr)}
+@media(max-width:700px){.r3,.r2{grid-template-columns:1fr}}
+button{font:inherit;cursor:pointer;border-radius:var(--r)}
+.btn{background:transparent;border:1px solid var(--line);color:var(--text);padding:8px 14px;font-size:13.5px;font-weight:500}
+.btn:hover{border-color:var(--signal);color:var(--bright)}
+.btn.solid{background:var(--signal);border-color:var(--signal);color:#1A1205;font-weight:600}
+.btn.solid:hover{background:#EEB54E}
+.btn.solid:disabled{background:var(--line);border-color:var(--line);color:var(--dim);cursor:not-allowed}
+.btn.sm{padding:5px 10px;font-size:12.5px}
+.page{border:1px solid var(--line);background:var(--panel2);padding:14px;margin-bottom:12px}
+.ptop{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+.ptop input{flex:1}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.chip{border:1px solid var(--line);background:var(--panel2);color:var(--dim);padding:4px 10px;font-size:12.5px;font-family:"IBM Plex Mono",monospace;user-select:none;cursor:pointer}
+.chip.on{border-color:var(--flow);color:var(--flow)}
+.chip.off{opacity:.42;text-decoration:line-through}
+.note{border-left:2px solid var(--signal);padding:10px 14px;background:var(--panel2);color:var(--dim);font-size:13.5px;margin:12px 0}
+.note b{color:var(--bright)}
+.note.bad{border-left-color:var(--bad)}
+details{margin:12px 0}
+summary{cursor:pointer;color:var(--flow);font-size:13.5px;font-weight:500;padding:4px 0}
+.dash{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);margin:14px 0}
+.cell{background:var(--panel2);padding:12px 14px}
+.cell .n{font-size:26px;font-weight:700;color:var(--signal);line-height:1.1;font-variant-numeric:tabular-nums}
+.cell .l{font-size:12px;color:var(--dim);margin-top:2px}
+@media(max-width:620px){.dash{grid-template-columns:repeat(2,1fr)}}
+.pbar{height:4px;background:var(--panel2);border:1px solid var(--line);margin:12px 0 6px}
+.pbar i{display:block;height:100%;background:var(--signal);width:0;transition:width .3s}
+.log{font-family:"IBM Plex Mono",monospace;font-size:12.5px;background:var(--panel2);border:1px solid var(--line);padding:12px;max-height:260px;overflow:auto;margin-top:12px}
+.log div{padding:2px 0;color:var(--dim);white-space:pre-wrap;word-break:break-word}
+.log .ok{color:var(--flow)}.log .er{color:var(--bad)}.log .go{color:var(--signal)}.log .wa{color:var(--warn)}
+table{width:100%;border-collapse:collapse;margin:8px 0 18px;font-size:13.5px}
+th{background:var(--panel2);color:var(--bright);text-align:left;padding:8px 10px;border:1px solid var(--line);font-weight:600;font-size:12.5px}
+td{padding:8px 10px;border:1px solid var(--line);vertical-align:top}
+td:first-child{font-weight:500}
+.tw{overflow-x:auto}
+ul{margin:4px 0 16px;padding-left:20px}li{margin-bottom:5px}
+.mono{font-family:"IBM Plex Mono",monospace;font-size:12.5px}
+.tag{display:inline-block;padding:1px 7px;font-size:11.5px;font-weight:600;border-radius:2px;font-family:"IBM Plex Mono",monospace}
+.t1{background:#2C4A3B;color:#A8D9B8}.t2{background:#39442F;color:#C3D49B}
+.t3{background:#4A4026;color:#E8CE8C}.t4{background:#4A2F2C;color:#E3A99C}.tx{background:#333;color:#999}
+.prov{border-left:3px solid var(--signal);background:var(--panel2);padding:14px 16px;margin:28px 0 14px}
+.prov h2{margin:0 0 6px}.prov p{margin:0;color:var(--dim);font-size:13.5px;max-width:78ch}
+.prov.b{border-left-color:var(--flow)}.prov.c{border-left-color:var(--warn)}
+.flat{cursor:text;font-family:"IBM Plex Mono",monospace;font-size:12.5px;line-height:1.6;background:var(--panel2);border:1px solid var(--line);padding:14px;max-height:420px;overflow:auto;white-space:pre-wrap;user-select:all;margin:10px 0}
+.cbox{border:1px solid var(--line);background:var(--panel);padding:14px 16px;margin:14px 0}
+.cbox .cl{color:var(--signal);font-size:12.5px;font-weight:600;font-family:"IBM Plex Mono",monospace;margin-bottom:6px}
+#results{display:none}#results.show{display:block}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:16px 0 24px}
+.bar select{width:auto}
+footer{border-top:1px solid var(--line);margin-top:50px;padding:24px 0 60px;color:var(--dim);font-size:13.5px}
+:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+.conn{border:1px solid var(--line);background:var(--panel2);padding:14px 16px;margin:4px 0 14px}
+.hide{display:none}
+</style>
+</head>
+<body>
+
+<header><div class="wrap">
+  <h1>Pattern Transfer</h1>
+  <p class="sub">Keyword candidate builder for pages the tools say have no volume</p>
+  <p class="lede">Paste the keywords from pages you have already researched. This maps what has an ancestor, expands the concepts into keywords that were never in your list, then derives what no previous page could have told you. It does not check volume. It builds the list you take to a volume tool.</p>
+  <p><a href="about.html">How this works, with examples and a diagram</a></p>
+</div></header>
+
+<main class="wrap">
+
+<section class="step">
+  <div class="shead"><span class="snum">01</span><div><h2>The page you are building</h2>
+    <span class="sdesc">Three required fields. Everything else has a sensible default.</span></div></div>
+  <div class="sbody">
+    <div class="row r3">
+      <div><label for="svc">Service</label><input id="svc" placeholder="oven repair"></div>
+      <div><label for="city">City</label><input id="city" placeholder="Flagstaff"></div>
+      <div><label for="state">State or region</label><input id="state" placeholder="Arizona"></div>
+    </div>
+    <div class="row r2">
+      <div><label for="obvious">What the obvious keyword returned <span class="op">optional</span></label>
+        <input id="obvious" placeholder="dryer repair flagstaff — nothing"></div>
+      <div><label for="root2">Second natural wording for the service <span class="op">optional but recommended</span></label>
+        <input id="root2" placeholder="clothes dryer repair"></div>
+    </div>
+
+    <div class="conn">
+      <h3 style="margin-top:6px">Connection</h3>
+      <div class="row r2">
+        <div><label for="prov">Who answers</label>
+          <select id="prov">
+            <option value="claude">Claude, inside this chat — no key needed</option>
+            <option value="server">My Vercel server key — Groq, Gemini or any OpenAI-compatible</option>
+            <option value="own">Gemini with a key I paste below</option>
+          </select></div>
+        <div style="align-self:end"><button class="btn" id="test" style="width:100%">Test connection</button></div>
+      </div>
+      <div class="row r2" id="srvRow" style="display:none">
+        <div><label for="srvProv">Which server key to use</label>
+          <select id="srvProv">
+            <option value="">Whatever is set on the server</option>
+            <option value="groq">Groq</option>
+            <option value="gemini">Gemini</option>
+            <option value="openai">OpenAI-compatible (Cerebras, OpenRouter, Mistral)</option>
+          </select></div>
+        <div><label for="srvModel">Model name</label>
+          <input id="srvModel" placeholder="llama-3.3-70b-versatile"></div>
+      </div>
+      <div class="row" id="keyRow" style="display:none">
+        <div><label for="key">Gemini API key</label>
+          <input id="key" type="password" placeholder="AIza..."></div>
+      </div>
+      <div id="srv" class="note">Checking the connection...</div>
+    </div>
+
+    <details>
+      <summary>Model settings</summary>
+      <div class="row r3" style="margin-top:12px">
+        <div><label for="model">Model</label>
+          <input id="model" value="gemini-2.5-flash" placeholder="gemini-2.5-flash"></div>
+        <div><label for="delay">Pause between calls (ms)</label><input id="delay" type="number" value="4500"></div>
+        <div><label for="maxtok">Max output tokens per call</label><input id="maxtok" type="number" value="16000"></div>
+      </div>
+      <div class="note"><b>Free tier.</b> Flash allows more requests per minute than Pro, so it is the
+        default. On a free key keep the pause at 4500ms or higher. If calls fail with 429, raise it.
+        Model names change, so if you get a model error, paste the current name.</div>
+    </details>
+  </div>
+</section>
+
+<section class="step">
+  <div class="shead"><span class="snum">02</span><div><h2>Define the scope</h2>
+    <span class="sdesc">What this service is, and what it is not. Everything downstream is held to this.</span></div></div>
+  <div class="sbody">
+    <p class="sdesc" style="margin-bottom:12px">Before any keyword work, the model reads your service
+      term and writes down exactly what it means: what the machine is, which jobs belong on this page,
+      which adjacent services must stay off it, and which readings of the phrase are not yours. You
+      check it, edit it, and confirm. Nothing runs until you do.</p>
+    <button class="btn solid" id="analyse">Analyse the service</button>
+    <button class="btn" id="skipScope">Skip and use defaults</button>
+    <div class="sdesc" style="margin-top:10px">Two short calls, usually under fifteen seconds. The
+      button shows which one is running.</div>
+    <div id="scopeOut" class="hide" style="margin-top:16px"></div>
+  </div>
+</section>
+
+<section class="step">
+  <div class="shead"><span class="snum">03</span><div><h2>Pages you have already researched</h2>
+    <span class="sdesc">One block per page. Two or more pages makes the pattern validation reliable.</span></div></div>
+  <div class="sbody">
+    <div id="pages"></div>
+    <button class="btn" id="addPage">Add another page</button>
+    <div class="note">One keyword per line. <b>Volume is optional.</b> Put it after a tab, comma or space
+      if you have it, or leave it off entirely. This tool never checks volume, it only builds the
+      candidate list, so a keyword with no number is just as useful here.<br>
+      <span class="mono">appliance repair flagstaff　390</span><br>
+      <span class="mono">flagstaff appliance repair</span></div>
+  </div>
+</section>
+
+<section class="step">
+  <div class="shead"><span class="snum">04</span><div><h2>Pre-scan</h2>
+    <span class="sdesc">Catches brand and proximity keywords before they get carried across by accident.</span></div></div>
+  <div class="sbody">
+    <button class="btn" id="scan">Scan pasted keywords</button>
+    <div id="scanOut" class="hide">
+      <h3>Brand keywords found</h3>
+      <p class="sdesc">A brand in your old list may not make this product at all. Click any chip to drop it.</p>
+      <div style="display:flex;gap:8px;margin:8px 0">
+        <button class="btn sm" id="brandNone" type="button">Drop all brands</button>
+        <button class="btn sm" id="brandAll" type="button">Keep all brands</button></div>
+      <div class="chips" id="brandChips"></div>
+
+      <h3>Proximity keywords found</h3>
+      <p class="sdesc">Without a Business Profile these are normally excluded as a class.</p>
+      <div style="display:flex;gap:8px;margin:8px 0">
+        <button class="btn sm" id="nearNone" type="button">Drop all proximity</button>
+        <button class="btn sm" id="nearAll" type="button">Keep all proximity</button></div>
+      <div class="chips" id="nearChips"></div>
+      <div class="note"><label style="display:flex;gap:9px;align-items:flex-start;color:var(--text);font-size:14px">
+        <input type="checkbox" id="noNear" checked style="width:auto;margin-top:4px">
+        <span><b>Block every proximity keyword, everywhere.</b> Stops the model inventing new
+        "near me" variants during expansion, and strips any that slip through before the final list.
+        Leave this on unless you have a Google Business Profile.</span></label></div>
+      <h3>Concept families to expand <span class="op" style="font-size:13px;color:var(--flow)">optional</span></h3>
+      <p class="sdesc">Each family is a separate small call, which is what keeps this working on a free key. Untick any you do not need.</p>
+      <div class="chips" id="famChips"></div>
+      <div id="scanStats" class="note"></div>
+    </div>
+  </div>
+</section>
+
+<section class="step">
+  <div class="shead"><span class="snum">05</span><div><h2>Run</h2>
+    <span class="sdesc">Small calls, one after another, so a free key can handle it.</span></div></div>
+  <div class="sbody">
+    <button class="btn solid" id="run" disabled>Run</button>
+    <button class="btn" id="stop" disabled>Stop</button>
+    <label style="display:inline-flex;gap:8px;align-items:center;margin-left:8px;font-size:13.5px;color:var(--dim)">
+      <input type="checkbox" id="doValidate" checked style="width:auto">
+      Final validation pass: read every keyword back against the confirmed scope</label>
+    <div class="dash">
+      <div class="cell"><div class="n" id="mKw">0</div><div class="l">keywords built</div></div>
+      <div class="cell"><div class="n" id="mCall">0</div><div class="l">calls completed</div></div>
+      <div class="cell"><div class="n" id="mFail">0</div><div class="l">calls retried or failed</div></div>
+      <div class="cell"><div class="n" id="mTime">0s</div><div class="l">elapsed</div></div>
+    </div>
+    <div class="pbar"><i id="prog"></i></div>
+    <div class="sdesc" id="phase">Waiting.</div>
+    <div class="log" id="log"><div>Fill in the page details, paste your pages, then run the pre-scan.</div></div>
+  </div>
+</section>
+
+<div id="results">
+  <div class="bar">
+    <button class="btn solid" id="copyFlat">Copy every keyword, plain list</button>
+    <select id="chunk"><option value="0">All in one block</option><option value="100">Chunks of 100</option>
+      <option value="200">Chunks of 200</option><option value="500">Chunks of 500</option></select>
+    <button class="btn" id="copyMd">Copy as Markdown</button>
+    <button class="btn" id="dlMd">Download Markdown</button>
+    <button class="btn" id="dlCsv">Download CSV</button>
+    <button class="btn" id="dlJson">Download raw JSON</button>
+  </div>
+  <p class="sdesc" style="margin:-14px 0 20px">If a copy button cannot reach the clipboard, it selects
+  the text instead and tells you to press Ctrl+C. Clicking any keyword block also selects all of it.</p>
+  <div id="out"></div>
+</div>
+
+</main>
+
+<footer><div class="wrap"><p>Everything here is a candidate list, not verified fact. Brands, error codes,
+regulations and local claims come back marked for verification because the model cannot check them.
+Verify before you write. <a href="about.html">How this works</a></p></div></footer>
+
+<script>
+const S={pages:[],parsed:[],brands:{},near:{},fams:{},stages:{},md:"",kw:0,calls:0,fails:0,stop:false,t0:0};
+const el=id=>document.getElementById(id);
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function log(m,cls=""){const d=document.createElement('div');if(cls)d.className=cls;d.textContent=m;
+  el('log').appendChild(d);el('log').scrollTop=el('log').scrollHeight;}
+function metrics(){el('mKw').textContent=S.kw;el('mCall').textContent=S.calls;el('mFail').textContent=S.fails;
+  el('mTime').textContent=S.t0?Math.round((Date.now()-S.t0)/1000)+'s':'0s';}
+setInterval(()=>{if(S.t0)metrics();},1000);
+
+['model','city','state','delay','maxtok'].forEach(k=>{const v=localStorage.getItem('pt_'+k);
+  if(v)el(k).value=v;el(k).addEventListener('change',()=>localStorage.setItem('pt_'+k,el(k).value));});
+
+/* ---- providers ---- */
+S.mode='claude';
+function showSrv(cls, html){ el('srv').className='note'+(cls?' '+cls:''); el('srv').innerHTML=html; }
+const MODEL_DEFAULTS={groq:'llama-3.3-70b-versatile',gemini:'gemini-3.5-flash-lite',openai:''};
+function syncProv(){
+  const p = el('prov').value;
+  el('keyRow').style.display = (p==='own') ? '' : 'none';
+  el('srvRow').style.display = (p==='server') ? '' : 'none';
+  el('delay').value = (p==='claude') ? 400 : (p==='server' && el('srvProv').value==='groq') ? 2200 : 4500;
+  if(p==='own' && !el('model').value.trim()) el('model').value='gemini-3.5-flash-lite';
+}
+el('srvProv').addEventListener('change',()=>{
+  const v=el('srvProv').value;
+  if(v && MODEL_DEFAULTS[v]!==undefined && !el('srvModel').value.trim()) el('srvModel').value=MODEL_DEFAULTS[v];
+  el('delay').value = (v==='groq') ? 2200 : 4500;
+  probe();
+});
+el('prov').addEventListener('change', ()=>{ syncProv(); probe(); });
+
+async function probe(loud){
+  const p = el('prov').value;
+  S.mode = p;
+
+  if(p==='claude'){
+    try{
+      const r = await fetch('https://api.anthropic.com/v1/messages',{
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({model:'claude-sonnet-4-6', max_tokens:1000,
+          messages:[{role:'user', content:'Reply with exactly this and nothing else: {"ok":true}'}]})
+      });
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const d = await r.json();
+      const t = (d.content||[]).map(i=>i.text||'').join('');
+      if(!t) throw new Error('empty reply');
+      showSrv('', '<b>Connected to Claude.</b> No key needed. This works inside the Claude preview only. '
+        + 'When you deploy to Vercel, switch this to one of the Gemini options.');
+      if(loud) log('Connection: Claude, in this chat. Ready to run.','ok');
+      return 'claude';
+    }catch(e){
+      S.mode='none';
+      showSrv('bad','<b>Claude is not reachable from this view.</b> '+esc(e.message)
+        +'<br><br>This option only works when the tool is open inside the Claude preview. '
+        +'If you are on Vercel or a local file, pick one of the Gemini options instead.');
+      if(loud) log('Connection: Claude unreachable. '+e.message,'er');
+      return 'none';
+    }
+  }
+
+  if(p==='own'){
+    if(el('key').value.trim()){
+      showSrv('', '<b>Ready.</b> Using the key you pasted. Calls go straight from this browser to Google.');
+      if(loud) log('Connection: your own Gemini key. Ready to run.','ok');
+      return 'own';
+    }
+    S.mode='none';
+    showSrv('bad','<b>No key entered.</b> Paste a Gemini API key in the box above.');
+    return 'none';
+  }
+
+  let status='no response', ctype='', head='';
+  try{
+    const r = await fetch('/api/generate',{method:'GET',headers:{'Accept':'application/json'}});
+    status=r.status; ctype=r.headers.get('content-type')||'';
+    const raw = await r.text(); head = raw.slice(0,90).replace(/\s+/g,' ');
+    let d=null; try{ d=JSON.parse(raw); }catch(e){}
+    if(d && d.ok && d.hasKey){
+      const have=Object.keys(d.keys||{}).filter(k=>d.keys[k]);
+      const want=el('srvProv').value;
+      if(want && !have.includes(want)){
+        S.mode='none';
+        showSrv('bad','<b>'+esc(want)+' is not set on the server.</b> Keys found: '
+          +esc(have.join(', ')||'none')+'. Either pick one of those above, or add '
+          +'<span class="mono">'+esc(want.toUpperCase())+'_API_KEY</span> in Vercel and redeploy.');
+        return 'none';
+      }
+      showSrv('', '<b>Connected.</b> Server keys available: <b>'+esc(have.join(', '))+'</b>.'
+        + (have.includes('gemini') && !have.includes('groq')
+          ? '<br><br><b>Note on Gemini.</b> Flash models are capped at about 20 requests per day on the free tier and one run of this tool makes roughly 35. Use a Flash-Lite model name, or add a Groq key instead.'
+          : ''));
+      if(loud) log('Connection: server. Keys: '+have.join(', '),'ok');
+      return 'server';
+    }
+    S.mode='none';
+    const why = (d && d.ok && !d.hasKey)
+      ? 'The function is running but <span class="mono">GEMINI_API_KEY</span> is not set. Add it in Vercel, then <b>redeploy</b>.'
+      : 'The request came back as a web page instead of JSON, so the function is not running. Either this file is open straight from your computer, or <span class="mono">api/generate.js</span> is missing from the deployed repo.';
+    showSrv('bad','<b>No server key available.</b> '+why
+      +'<br><br>For now, switch "Who answers" to <b>Claude</b> and it will just work.'
+      +'<br><br><span class="mono">HTTP '+status+' · '+esc(ctype||'no content-type')+' · '+esc(head)+'</span>');
+    if(loud) log('Connection: none. HTTP '+status+' · '+ctype+' · '+head,'er');
+    return 'none';
+  }catch(e){
+    S.mode='none';
+    showSrv('bad','<b>No server key available.</b> Could not reach <span class="mono">/api/generate</span> ('+esc(e.message)+').'
+      +'<br><br>Switch "Who answers" to <b>Claude</b> to run it here.');
+    if(loud) log('Connection: none. '+e.message,'er');
+    return 'none';
+  }
+}
+syncProv(); probe();
+el('key').addEventListener('input', ()=>{ clearTimeout(S._kt); S._kt=setTimeout(()=>probe(),400); });
+el('test').onclick = async (e)=>{
+  e.target.textContent='Testing...'; e.target.disabled=true;
+  const m = await probe(true);
+  e.target.textContent='Test connection'; e.target.disabled=false;
+  if(m==='none') el('srv').scrollIntoView({behavior:'smooth',block:'center'});
+};
+
+/* ---- evidence pages ---- */
+function addPage(name="",text=""){
+  const d=document.createElement('div');d.className='page';
+  d.innerHTML=`<div class="ptop"><input placeholder="Page name, e.g. Home page / Refrigerator repair" value="${esc(name)}">
+    <button class="btn sm" type="button">Remove</button></div>
+    <textarea placeholder="appliance repair flagstaff\t390&#10;flagstaff appliance repair">${esc(text)}</textarea>`;
+  d.querySelector('button').onclick=()=>d.remove();
+  el('pages').appendChild(d);
+}
+el('addPage').onclick=()=>addPage();
+addPage("Home page");addPage("");
+
+/* ---- parse ---- */
+const BRANDS=("samsung whirlpool maytag lg ge kenmore bosch frigidaire electrolux amana kitchenaid speed queen "+
+"roper estate thermador viking wolf bertazzoni sub-zero subzero miele haier hotpoint asko fisher paykel "+
+"jenn-air jennair magic chef admiral insinkerator rheem trane carrier lennox goodman york bryant navien "+
+"noritz bradford ao smith weil-mclain burnham ruud daikin mitsubishi panasonic dacor monogram cafe hisense "+
+"midea danby avanti summit blomberg smeg").split(/\s+(?=[a-z])/);
+const NEARRE=/\b(near me|nearby|near my|close to me|around me|in my area)\b/i;
+const FAMILIES=[["brand","brand"],["symptom","symptom"],["parts","parts"],["question","question"],
+ ["cost","cost"],["decision","decision"],["type_variant","type / variant"],["urgency","urgency"],
+ ["colloquial","colloquial"],["tenure_segment","tenure / segment"],["maintenance_prevention","maintenance"],
+ ["installation_replacement","installation"],["warranty_insurance","warranty"],
+ ["emergency_after_hours","emergency"],["commercial_vs_residential","commercial vs residential"],
+ ["seasonal","seasonal"],["diy_boundary","DIY boundary"]];
+
+function parseAll(){
+  S.pages=[];
+  document.querySelectorAll('#pages .page').forEach(p=>{
+    const name=p.querySelector('input').value.trim()||'Unnamed page';
+    const raw=p.querySelector('textarea').value.trim();
+    if(!raw)return;
+    const kws=raw.split('\n').map(l=>l.trim()).filter(Boolean).map(line=>{
+      const m=line.match(/^(.*?)[\t,;|]?\s*(\d[\d,]*)\s*$/);
+      if(m&&m[1].trim())return{kw:m[1].trim().replace(/[,;|]$/,''),vol:parseInt(m[2].replace(/,/g,''),10)};
+      return{kw:line.replace(/[,;|]$/,''),vol:null};
+    }).filter(o=>o.kw);
+    if(kws.length)S.pages.push({name,kws});
+  });
+  S.parsed=S.pages.flatMap(p=>p.kws.map(k=>({...k,page:p.name})));
+  return S.parsed.length;
+}
+
+function chips(obj,host,labels){
+  host.innerHTML='';
+  const keys=Object.keys(obj);
+  if(!keys.length){host.innerHTML='<span class="sdesc">None found.</span>';return;}
+  keys.forEach(k=>{const c=document.createElement('span');
+    c.className='chip '+(obj[k]?'on':'off');c.textContent=labels?labels[k]||k:k;
+    c.onclick=()=>{obj[k]=!obj[k];c.className='chip '+(obj[k]?'on':'off');};host.appendChild(c);});
+}
+
+function bulk(obj,host,val,labels){Object.keys(obj).forEach(k=>obj[k]=val);chips(obj,host,labels);}
+el('brandNone').onclick=()=>bulk(S.brands,el('brandChips'),false);
+el('brandAll').onclick =()=>bulk(S.brands,el('brandChips'),true);
+el('nearNone').onclick =()=>bulk(S.near,el('nearChips'),false);
+el('nearAll').onclick  =()=>bulk(S.near,el('nearChips'),true);
+el('noNear').onchange  =()=>{if(el('noNear').checked)bulk(S.near,el('nearChips'),false);};
+
+el('scan').onclick=()=>{
+  const n=parseAll();
+  if(!n){alert('Paste some keywords first.');return;}
+  S.brands={};S.near={};
+  S.parsed.forEach(o=>{const low=' '+o.kw.toLowerCase()+' ';
+    BRANDS.forEach(b=>{if(low.includes(' '+b+' ')||low.startsWith(' '+b))S.brands[b]=true;});
+    if(NEARRE.test(o.kw))S.near[o.kw.toLowerCase()]=true;});
+  S.fams={};const fl={};FAMILIES.forEach(([id,lab])=>{S.fams[id]=true;fl[id]=lab;});
+  chips(S.brands,el('brandChips'));
+  chips(S.near,el('nearChips'));
+  if(el('noNear').checked){Object.keys(S.near).forEach(k=>S.near[k]=false);chips(S.near,el('nearChips'));}
+  chips(S.fams,el('famChips'),fl);
+  const withVol=S.parsed.filter(k=>k.vol!=null).length;
+  el('scanStats').innerHTML=`<b>${n}</b> keywords across <b>${S.pages.length}</b> page${S.pages.length>1?'s':''}, `
+    +`<b>${withVol}</b> with a volume figure. `
+    +(S.pages.length<2?'Only one page supplied, so pattern tiers will be marked provisional. A single page cannot be separated from its own head-term volume.'
+      :'Two or more pages, so cross-page agreement can be tested properly.');
+  el('scanOut').classList.remove('hide');
+  if(S.scope&&S.scope.confirmed)el('run').disabled=false;
+  else log('Scan done. Confirm the scope in step 02 to unlock the run.','wa');
+  log(`Pre-scan: ${n} keywords, ${Object.keys(S.brands).length} brands, ${Object.keys(S.near).length} proximity terms.`,'ok');
+};
+
+/* ---- json repair ---- */
+function parseLoose(txt){
+  let t=String(txt||'').trim().replace(/^```(?:json)?/i,'').replace(/```$/,'').trim();
+  try{return JSON.parse(t);}catch(e){}
+  const a=t.indexOf('{');if(a>0)t=t.slice(a);
+  try{return JSON.parse(t);}catch(e){}
+  const close=s=>{const st=[];let inS=false,esc2=false;
+    for(const ch of s){if(inS){if(esc2)esc2=false;else if(ch==='\\')esc2=true;else if(ch==='"')inS=false;continue;}
+      if(ch==='"'){inS=true;continue;}
+      if(ch==='{')st.push('}');else if(ch==='[')st.push(']');else if(ch==='}'||ch===']')st.pop();}
+    return (inS?'"':'')+st.reverse().join('');};
+  try{return JSON.parse(t+close(t));}catch(e){}
+  let cut=t.lastIndexOf(','),tries=0;
+  while(cut>0&&tries<80){
+    const cand=t.slice(0,cut);
+    try{return JSON.parse(cand+close(cand));}catch(e){}
+    cut=t.lastIndexOf(',',cut-1);tries++;
+  }
+  throw new Error('Could not parse or repair the JSON the model returned.');
+}
+
+/* ---- gemini with retry ---- */
+const TRUNC_HINT='\n\nIMPORTANT: your previous reply was cut off before the JSON closed. Return at most HALF as many items this time, and keep every string under 12 words. Completing the JSON matters more than covering everything.';
+async function gemini(prompt,label){
+  const prov=el('prov').value;
+  let p=prompt, wasTrunc=false;
+  const model=el('model').value.trim()||'gemini-2.5-flash';
+  const maxTokens=parseInt(el('maxtok').value,10)||16000;
+  const attempts=4;
+  for(let i=1;i<=attempts;i++){
+    if(S.stop)throw new Error('Stopped.');
+    try{
+      let text,finish;
+      if(prov==='claude'){
+        const r=await fetch('https://api.anthropic.com/v1/messages',{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,
+            messages:[{role:'user',content:p}]})});
+        if(!r.ok)throw Object.assign(new Error('HTTP '+r.status),{status:r.status});
+        const d=await r.json();
+        text=(d.content||[]).map(x=>x.type==='text'?(x.text||''):'').join('');
+        finish=d.stop_reason==='max_tokens'?'MAX_TOKENS':'STOP';
+      }else if(prov==='own'){
+        const ownKey=el('key').value.trim();
+        const url=`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(ownKey)}`;
+        const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({contents:[{role:'user',parts:[{text:p}]}],
+            generationConfig:{temperature:0.4,maxOutputTokens:maxTokens,responseMimeType:'application/json'}})});
+        const d=await r.json();
+        if(!r.ok)throw Object.assign(new Error(d?.error?.message||('HTTP '+r.status)),{status:r.status});
+        const c=d?.candidates?.[0];finish=c?.finishReason;
+        text=(c?.content?.parts||[]).map(p=>p.text||'').join('');
+      }else{
+        const r=await fetch('/api/generate',{method:'POST',
+          headers:{'Content-Type':'application/json','Accept':'application/json'},
+          body:JSON.stringify({prompt:p,model:(el('srvModel').value.trim()||undefined),provider:(el('srvProv').value||undefined),maxTokens})});
+        const raw=await r.text();
+        let d=null;try{d=JSON.parse(raw);}catch(e){
+          throw Object.assign(new Error('The /api/generate endpoint returned a web page instead of JSON, so the serverless function is not running. Switch "Who answers" to Claude, or paste your own Gemini key.'),{status:0,fatal:true});}
+        if(!r.ok)throw Object.assign(new Error(d.error||('HTTP '+r.status)),{status:r.status});
+        text=d.text;finish=d.finishReason;
+      }
+      if(finish&&finish!=='STOP'){
+        log(`    ${label}: reply was cut short (${finish}).`,'wa');
+        wasTrunc=true;
+      }
+      if(!text||!text.trim())throw new Error('Empty response.');
+      let out;
+      try{ out=parseLoose(text); }
+      catch(pe){
+        if(i<attempts){ p=prompt+TRUNC_HINT; throw Object.assign(new Error('truncated JSON'),{status:0}); }
+        throw pe;
+      }
+      if(wasTrunc&&i<attempts){
+        log(`    ${label}: retrying smaller so nothing is lost.`,'wa');
+        p=prompt+TRUNC_HINT; wasTrunc=false; S.fails++; metrics(); await sleep(600);
+        continue;
+      }
+      S.calls++;metrics();
+      return out;
+    }catch(err){
+      const st=err.status||0;
+      if(err.fatal){log('    '+label+' failed: '+err.message,'er');S.fatal=err.message;return null;}
+      const retryable=st===429||st===500||st===503||st===529||/parse|repair|Empty|truncated/i.test(err.message);
+      S.fails++;metrics();
+      if(i===attempts||!retryable||S.stop){log(`    ${label} failed: ${err.message}`,'er');return null;}
+      const wait=(st===0)?800:Math.min(30000,1500*Math.pow(2,i));
+      log(`    ${label} attempt ${i} failed (${err.message.slice(0,80)}). Retrying in ${wait/1000}s.`,'wa');
+      await sleep(wait);
+    }
+  }
+  return null;
+}
+
+/* ---- context ---- */
+function ctx(){
+  return{svc:el('svc').value.trim(),city:el('city').value.trim(),state:el('state').value.trim(),
+    obvious:el('obvious').value.trim(),root2:el('root2').value.trim(),noNear:el('noNear').checked,
+    keptBrands:Object.keys(S.brands).filter(b=>S.brands[b]),
+    keptNear:Object.keys(S.near).filter(k=>S.near[k]),
+    dropped:Object.keys(S.brands).filter(b=>!S.brands[b]).concat(Object.keys(S.near).filter(k=>!S.near[k])),
+    fams:Object.keys(S.fams).filter(f=>S.fams[f]),
+    single:S.pages.length<2};
+}
+/* cap what we send so a huge evidence base never blows the prompt */
+function evidenceBlock(limitPerPage=260){
+  return S.pages.map(p=>{
+    const sorted=[...p.kws].sort((a,b)=>(b.vol||0)-(a.vol||0));
+    const use=sorted.slice(0,limitPerPage);
+    const extra=sorted.length>limitPerPage?`\n(+${sorted.length-limitPerPage} more on this page, omitted for length)`:'';
+    return `## ${p.name}\n`+use.map(k=>`${k.kw}${k.vol!=null?' | '+k.vol:''}`).join('\n')+extra;
+  }).join('\n\n');
+}
+function countKw(){
+  let n=0;const {s3,s4,s5,s6}=S.stages;
+  if(s3){n+=(s3.locationKeywords||[]).length;
+    (s3.concepts||[]).forEach(c=>n+=(c.newKeywords||[]).length);
+    (s3.brands||[]).forEach(b=>n+=(b.keywords||[]).length);}
+  if(s4?.expansions)s4.expansions.forEach(e=>n+=(e.keywords||[]).length);
+  if(s5)['physical','failures','regulatory','localPhysical','adjacent'].forEach(k=>
+    (s5[k]||[]).forEach(i=>n+=(i.keywords||[]).length));
+  if(s6?.masterList)n=Math.max(n,s6.masterList.length);
+  S.kw=n;metrics();
+}
+
+/* ================= SCOPE: what this service is, and is not ================= */
+S.scope=null;
+
+function qScopeA(c){return `You are a local SEO strategist about to research keywords for one service page.
+
+SERVICE TERM: "${c.svc}"${c.root2?` (also written "${c.root2}")`:''}
+CITY: ${c.city}, ${c.state}
+${S.scopeNotes?`
+OPERATOR INSTRUCTIONS, these override your own judgement. Apply them exactly:
+${S.scopeNotes}`:''}
+
+Define what this page is about. Be brief and concrete.
+- productDefinition: what this machine or service physically is. Under 30 words.
+- customerCalls: words real customers use for it. At most 4.
+- includes: jobs that genuinely belong on THIS page. At most 5, three words each.
+- excludes: neighbouring services that must NOT appear here. At most 5. Include every appliance that
+  sits near this one or shares a room with it. Keep "why" under 10 words.
+- ambiguities: other readings of the phrase that are NOT ours. At most 2.
+${RULES_BASE}
+JSON: {"productDefinition":"","customerCalls":[""],"includes":[""],
+"excludes":[{"service":"","why":"","ownPage":true}],
+"ambiguities":[{"reading":"","whyNotOurs":""}]}`;}
+
+function qScopeB(c,a){return `Keyword scope filters for a service page.
+
+SERVICE: "${c.svc}"${c.root2?` (also "${c.root2}")`:''} in ${c.city}, ${c.state}
+THIS PAGE IS ABOUT: ${a?.productDefinition||c.svc}
+OFF THIS PAGE: ${(a?.excludes||[]).map(e=>e.service).join(', ')||'none listed'}
+${S.scopeNotes?`
+OPERATOR INSTRUCTIONS, these override your own judgement. Apply them exactly:
+${S.scopeNotes}`:''}
+
+Produce two filter lists and one sentence. Nothing else.
+- requiredTerms: the product noun and its common variants. Every keyword must contain one of these.
+  At most 4. Single words or two-word phrases only.
+- bannedTerms: literal words that signal a DIFFERENT appliance or service. Include the product noun
+  of every excluded service above. At most 10. Single words only where possible.
+- fragmentWarning: one sentence saying a keyword must be a phrase a person would type, never a bare
+  part name or a two-word symptom label.
+${RULES_BASE}
+JSON: {"requiredTerms":[""],"bannedTerms":[""],"fragmentWarning":""}`;}
+
+const SCOPE=c=>{
+  const s=S.scope; if(!s)return '';
+  return `
+SCOPE OF THIS PAGE, agreed with the operator. Obey it exactly.
+This page is about: ${s.productDefinition||c.svc}
+Customers call it: ${(s.customerCalls||[]).join(', ')}
+In scope: ${(s.includes||[]).join(' · ')}
+OFF THIS PAGE, never generate keywords for these: ${(s.excludes||[]).map(e=>e.service).join(' · ')}
+EVERY keyword you output must contain at least one of: ${(s.requiredTerms||[]).join(', ')}
+NEVER output a keyword containing any of: ${(s.bannedTerms||[]).join(', ')}
+Not what we mean: ${(s.ambiguities||[]).map(a=>a.reading).join(' · ')}
+FRAGMENT RULE: ${s.fragmentWarning||'every keyword must be a phrase a person would actually type into a search box, never a bare part name, a two-word symptom fragment, or a technical label.'}
+Examples of what is NOT a keyword and must never be output: "no heat", "thermostat", "won't dry",
+"drum free", "no flame", "overheating", "control board". These are labels, not searches.`;
+};
+
+async function doScope(){
+  const c=ctx();
+  if(!c.svc||!c.city)return alert('Add the service and the city first.');
+  const mode=await probe();
+  if(mode==='none'){alert('No connection. Set "Who answers" at the top of the page first.');return;}
+  const btn=el('analyse'); btn.disabled=true;
+  const say=t=>{btn.textContent=t;};
+  S.t0=S.t0||Date.now();
+
+  say('Step 1 of 2: what this service is...');
+  const A=await gemini(qScopeA(c),'scope A');
+  if(!A){ say('Analyse the service'); btn.disabled=false;
+    el('scopeOut').classList.remove('hide');
+    el('scopeOut').innerHTML='<div class="note bad"><b>The scope call did not come back.</b> '
+      +'Check the log in step 05 for the reason. Press <b>Analyse the service</b> to try again, or '
+      +'<b>Skip and use defaults</b> and fill the two filter boxes in yourself.</div>';
+    return; }
+
+  say('Step 2 of 2: the filters...');
+  const B=await gemini(qScopeB(c,A),'scope B');
+  say('Re-analyse the service'); btn.disabled=false;
+
+  const noun=c.svc.replace(/\s*(repair|service|fix|cleaning)\s*$/i,'').trim();
+  const noun2=c.root2?c.root2.replace(/\s*(repair|service|fix|cleaning)\s*$/i,'').trim():'';
+  S.scope={
+    productDefinition:A.productDefinition||c.svc,
+    customerCalls:A.customerCalls||[noun],
+    includes:A.includes||[c.svc],
+    excludes:A.excludes||[],
+    ambiguities:A.ambiguities||[],
+    requiredTerms:(B&&B.requiredTerms&&B.requiredTerms.length)?B.requiredTerms:[noun,noun2].filter(Boolean),
+    bannedTerms:(B&&B.bannedTerms)||[],
+    fragmentWarning:(B&&B.fragmentWarning)||'Every keyword must be a phrase a person would type, never a bare part name or a two-word symptom label.'
+  };
+  if(!B) alert('The filter call failed, so the required terms were filled in from your service name and the banned list is empty. Edit both boxes before confirming.');
+  renderScope();
+}
+
+function defaultScope(){
+  const c=ctx();
+  const noun=c.svc.replace(/\s*(repair|service|fix)\s*$/i,'').trim();
+  S.scope={productDefinition:c.svc,customerCalls:[noun],includes:[c.svc],excludes:[],
+    requiredTerms:[noun].concat(c.root2?[c.root2.replace(/\s*(repair|service|fix)\s*$/i,'').trim()]:[]),
+    bannedTerms:[],ambiguities:[],
+    fragmentWarning:'Every keyword must be a phrase a person would type, never a bare part name.'};
+  renderScope();
+}
+function renderScope(){
+  const s=S.scope;
+  const list=a=>(a||[]).map(x=>`<li>${esc(typeof x==='string'?x:(x.service||x.reading))}${x&&x.why?' — '+esc(x.why):''}${x&&x.whyNotOurs?' — '+esc(x.whyNotOurs):''}</li>`).join('');
+  el('scopeOut').innerHTML=`
+    <div class="note"><b>This page is about:</b> ${esc(s.productDefinition)}</div>
+    <div class="row r2">
+      <div><h3 style="margin-top:6px">In scope</h3><ul>${list(s.includes)||'<li>none given</li>'}</ul></div>
+      <div><h3 style="margin-top:6px">Off this page</h3><ul>${list(s.excludes)||'<li>none given</li>'}</ul></div>
+    </div>
+    ${(s.ambiguities||[]).length?`<h3>Not what we mean</h3><ul>${list(s.ambiguities)}</ul>`:''}
+    <div class="row">
+      <div><label for="scopeNotes">Tell the model what to change <span class="op">optional, plain English</span></label>
+        <textarea id="scopeNotes" style="min-height:64px" placeholder="e.g. keep stackable washer dryer terms, they belong here. Drop vent cleaning, it gets its own page. Add Speed Queen, it is everywhere in student rentals."></textarea></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button class="btn" id="redoScope" type="button">Re-analyse with my notes</button>
+    </div>
+    <div class="row r2">
+      <div><label for="reqT">Every keyword must contain one of these <span class="op">comma separated</span></label>
+        <textarea id="reqT" style="min-height:70px">${esc((s.requiredTerms||[]).join(', '))}</textarea></div>
+      <div><label for="banT">No keyword may contain any of these <span class="op">comma separated</span></label>
+        <textarea id="banT" style="min-height:70px">${esc((s.bannedTerms||[]).join(', '))}</textarea></div>
+    </div>
+    <div class="note"><b>Read these two boxes carefully.</b> They are the filter that stops another
+      appliance's keywords landing on this page. Anything generated later that fails them is removed
+      and listed separately, so nothing disappears quietly.<br><br>
+      <b>One trade-off to check.</b> A banned word also kills legitimate combination terms. Banning
+      <span class="mono">washer</span> on a dryer page removes
+      <span class="mono">stackable washer dryer repair</span> too. If a combination term belongs to
+      this page, take that word out of the banned box and rely on the excludes list instead.</div>
+    <button class="btn solid" id="confirmScope">Confirm scope and unlock the run</button>`;
+  el('scopeOut').classList.remove('hide');
+  if(S.scopeNotes)el('scopeNotes').value=S.scopeNotes;
+  el('redoScope').onclick=()=>{S.scopeNotes=el('scopeNotes').value.trim();doScope();};
+  el('confirmScope').onclick=()=>{
+    const split=v=>v.split(',').map(x=>x.trim()).filter(Boolean);
+    S.scope.requiredTerms=split(el('reqT').value);
+    S.scope.bannedTerms=split(el('banT').value);
+    S.scope.confirmed=true;
+    el('confirmScope').textContent='Scope confirmed';
+    el('confirmScope').disabled=true;
+    if(S.pages.length)el('run').disabled=false;
+    log('Scope confirmed. Required: '+S.scope.requiredTerms.join(', ')+
+        (S.scope.bannedTerms.length?' | Banned: '+S.scope.bannedTerms.join(', '):''),'ok');
+  };
+}
+el('analyse').onclick=doScope;
+el('skipScope').onclick=defaultScope;
+
+const RULES_BASE=`
+RULES:
+- Output ONE valid JSON object and nothing else. No prose, no markdown fences, no preamble.
+- Keep every string under 25 words.
+- Never state a brand, part, code, regulation or local fact as verified. Mark it unverified.`;
+
+const RULES=`
+RULES:
+- Output ONE valid JSON object and nothing else. No prose, no markdown fences, no preamble.
+- Keep every string under 25 words. Be terse. The reply is length limited, so brevity matters more
+  than completeness of phrasing.
+- Never invent volume. Volume may be missing from the input; that is expected and fine.
+- Never present a word swap as a transfer. Map by the ROLE a keyword plays.
+- Never state a brand, part, code, regulation or local fact as verified. Mark it unverified.
+- Concepts that do not apply DIE. Do not invent a replacement for symmetry.
+- The "family" field MUST be exactly one of: location, colloquial, urgency, brand, symptom,
+  type_variant, cost, decision, question, parts, tenure_segment, competitor_brand,
+  maintenance_prevention, installation_replacement, warranty_insurance, emergency_after_hours,
+  commercial_vs_residential, seasonal, diy_boundary. Never invent a new family name.
+- EVERY keyword must be a complete phrase someone would type into a search box. A bare part name, a
+  technical label, or a two-word symptom fragment is NOT a keyword and must never be output.`;
+
+const NEARBAN=c=>c.noNear?`
+PROXIMITY BAN: this business has no Google Business Profile. NEVER output a keyword containing
+"near me", "nearby", "near my", "close to me", "around me" or "in my area". Not one, in any family.`:'';
+
+const ROOTS=c=>`ROOT WORDINGS to use: "${c.svc}"${c.root2?` and "${c.root2}"`:''}. Build variants from
+${c.root2?'BOTH roots':'this root'}, not just one.`;
+
+const HEAD=c=>`Local SEO keyword research.
+NEW PAGE: ${c.svc} in ${c.city}, ${c.state}.
+The obvious keyword returned: ${c.obvious||'nothing measurable'}.`;
+
+/* ---------- prompts, each small enough for a short reply ---------- */
+function qPatterns(c){return `${HEAD(c)}
+
+EVIDENCE, keywords from pages already researched on this same site (volume shown where known):
+${evidenceBlock(120)}
+
+Strip the service noun to [SERVICE] and the city to [CITY], keeping word order and spelling exactly.
+Rank patterns by how many DIFFERENT pages each held up on, not by volume:
+tier 1 = held on 2+ services, tier 2 = one page only, tier 3 = strong on one page but collapsed on
+another (the volume belonged to that head term), tier 4 = only ever at a floor value.
+Return at most 18 patterns.${RULES}
+JSON: {"patterns":[{"pattern":"","tier":1,"sources":[""],"reasoning":""}],"provisional":${c.single},"tierNotes":""}`;}
+
+function qCity(c){return `${HEAD(c)}
+
+List at most 6 conditions in ${c.city}, ${c.state} that affect ${c.svc} specifically: climate,
+altitude, water, power, housing stock and age, tenure split, student or seasonal population.
+One line each on how it changes the service or the advice. Mark each unverified with the source
+type needed.${SCOPE(c)}${RULES}
+JSON: {"cityContext":[{"factor":"","detail":"","effectOnService":"","verification":""}]}`;}
+
+function qIcp(c){return `${HEAD(c)}
+
+Give at most 5 ICP segments for ${c.svc} in ${c.city}. Separate segments, not an average.
+Per segment: the trigger that makes them search, the driver that makes them call, and the one page
+section that exists for them.${SCOPE(c)}${RULES}
+JSON: {"icp":[{"segment":"","trigger":"","decisionDriver":"","sectionItNeeds":""}]}`;}
+
+function qFamilies(c){return `${HEAD(c)}
+
+EVIDENCE:
+${evidenceBlock(90)}
+
+A. Count the supplied keywords per family: location, colloquial, urgency, brand, symptom,
+type_variant, cost, decision, question, parts, tenure_segment, proximity, competitor_brand.
+
+B. BLIND SPOT AUDIT. Compare against this fuller map: the families above plus
+maintenance_prevention, installation_replacement, warranty_insurance, emergency_after_hours,
+commercial_vs_residential, seasonal, diy_boundary.
+For each family with ZERO inherited keywords, mark "genuinely_absent" with a reason, or
+"likely_blind_spot". Never default to absent just because nothing was supplied. Give the autocomplete
+fragment to type and whether it should be retrofitted into the already published pages.
+At most 8 blind spots.${SCOPE(c)}${RULES}
+JSON: {"families":[{"family":"","count":0}],
+"blindSpots":[{"family":"","verdict":"likely_blind_spot","reasoning":"","autocompleteSeed":"","retrofitExisting":true}]}`;}
+
+function qLocation(c,pats){return `${HEAD(c)}
+
+VALIDATED PATTERNS: ${JSON.stringify((pats||[]).slice(0,18)).slice(0,2200)}
+
+Build the location keyword set for ${c.svc} in ${c.city}, ${c.state} from these patterns.
+${ROOTS(c)}
+Include state suffix forms even at low tiers. Return at most 30 keywords, each with its tier and the
+pattern it came from.${SCOPE(c)}${NEARBAN(c)}${RULES}
+JSON: {"locationKeywords":[{"keyword":"","tier":1,"sourcePattern":""}]}`;}
+
+function qTransfer(c){return `${HEAD(c)}
+
+EVIDENCE:
+${evidenceBlock(90)}
+DROPPED by the operator, never reintroduce: ${c.dropped.join(', ')||'none'}
+
+MAPPING PASS ONLY. Carry across non-location concepts that ALREADY EXIST in the evidence. Every item
+must name the sourceKeyword it came from. No ancestor means it does not belong here.
+Verdicts: transfers_as_is, transforms, dies, splits.
+For transforms give the role the keyword plays (e.g. "the number one complaint", "the urgent safety
+one", "the cycle ran but the job is not done") and why a literal swap would fail.
+Match by ROLE, not vocabulary. Return at most 6 concepts. Keep customerSituation and whyNotASwap
+under 15 words each.
+${ROOTS(c)}${SCOPE(c)}${NEARBAN(c)}${RULES}
+JSON: {"concepts":[{"family":"","verdict":"transforms","sourceKeyword":"","role":"","newKeywords":[""],"whyNotASwap":""}]}`;}
+
+function qBrandsMapped(c){return `${HEAD(c)}
+
+Brands kept by the operator from the old pages: ${c.keptBrands.join(', ')||'none'}
+
+For each, say whether it makes ${c.svc.replace(/ repair$/i,'')} products at all: "makes",
+"does_not_make" or "unverified". Give up to 4 keywords each with the service noun attached.
+Do not add brands that were not in the list above. Return at most 8 brands.${SCOPE(c)}${NEARBAN(c)}${RULES}
+JSON: {"brands":[{"brand":"","status":"makes","keywords":[""],"note":""}]}`;}
+
+function qExpand(c,fam,city,icp,known){return `${HEAD(c)}
+
+CITY CONTEXT: ${JSON.stringify((city||[]).slice(0,5)).slice(0,1400)}
+ICP: ${JSON.stringify((icp||[]).slice(0,4)).slice(0,1100)}
+ALREADY PRODUCED, never repeat: ${known.slice(0,160).join(', ').slice(0,2600)}
+
+CONCEPT EXPANSION for one family only: ${fam}
+
+The old pages prove which KINDS of search this town performs. Brand keywords prove the audience
+searches by brand, not merely that those brands matter. So research what "${fam}" actually produces
+for ${c.svc} in ${c.city}, and give keywords that were NEVER in the source list.
+
+If brand: work out which makers actually build this product, then which appear in this city's housing
+stock given its age, income, rental share and any student or seasonal population. Include mainstream,
+budget-in-rentals, premium, and any commercial or regional name. Exclude makers that do not build it.
+If symptom or parts: derive from what maker parts diagrams and error code lists contain, and give the
+CUSTOMER wording, not the manual's.
+If question: write different questions for different ICP segments.
+
+LENGTH LIMITS, obey them strictly or the reply will be cut off:
+- conceptProved: under 20 words.
+- researchFindings: under 35 words. Summarise, do not narrate your reasoning.
+- keywords: 8 to 14 items. "sourceConcept" under 8 words.
+- brandVerification: ONLY if this family is "brand". For any other family return an empty array.
+${ROOTS(c)}${SCOPE(c)}${NEARBAN(c)}${RULES}
+JSON: {"family":"${fam}","conceptProved":"","researchFindings":"",
+"keywords":[{"keyword":"","sourceConcept":""}],"brandVerification":[{"brand":"","status":"makes","verifyWith":""}]}`;}
+
+function qPhysical(c){return `Technical research, no keyword list has been shown to you on purpose.
+SERVICE: ${c.svc}. LOCATION: ${c.city}, ${c.state}.
+
+Decompose the machine or system itself. Power source and FUEL TYPE and whether variants exist (this
+is often the biggest structural fact and the one keyword research always misses). Supply connections:
+water, gas, drain, vent, duct, electrical. Installation: freestanding, built in, stacked, wall, roof,
+portable. Size classes. Indoor or outdoor. What it shares a room, circuit, vent or line with.
+At most 6 aspects, each with up to 4 customer-worded keywords.${SCOPE(c)}${NEARBAN(c)}${RULES}
+JSON: {"physical":[{"aspect":"","detail":"","keywords":[""]}]}`;}
+
+function qFailures(c){return `Technical research. SERVICE: ${c.svc}.
+
+Do not brainstorm failures. Derive them from what maker parts diagrams, error code lists and service
+manual troubleshooting tables contain. Give the technical name AND the customer wording.
+"Igniter failure" is the manual, "oven won't light" is the search. Give both.
+Mark each unverified with the maker source needed. At most 8 failures, 3 keywords each.
+Keep cause and verification under 12 words each.${SCOPE(c)}${NEARBAN(c)}${RULES}
+JSON: {"failures":[{"technicalName":"","customerWording":"","cause":"","keywords":[""],"verification":""}]}`;}
+
+function qRegLocal(c){return `Technical research. SERVICE: ${c.svc}. LOCATION: ${c.city}, ${c.state}.
+
+A. Regulatory and safety: permits, licences, certifications, code requirements a customer might
+search, and any documented safety risk. Name the standards body if a real statistic exists, never
+invent the number. At most 4 items.
+B. Local physical conditions in ${c.city} affecting THIS service. Do not assume an angle that suits a
+different appliance applies here. At most 4.
+C. Adjacent services this one creates demand for, and whether each deserves its own page. At most 3.${SCOPE(c)}${NEARBAN(c)}${RULES}
+JSON: {"regulatory":[{"item":"","detail":"","keywords":[""],"verification":""}],
+"localPhysical":[{"factor":"","effect":"","keywords":[""],"verification":""}],
+"adjacent":[{"service":"","ownPage":true,"keywords":[""]}]}`;}
+
+function qJudge(c,total){return `${HEAD(c)}
+${total} candidate keywords have been built.
+
+1. Propose Primary, Secondary, Tertiary. Volume never promotes a keyword above its tier, and a zero
+volume Primary is normal and correct here. Say where traffic will realistically come from.
+2. Size it: estimate this service's share of the measured parent category, give a likely real monthly
+range, and say money page or supporting page. Be honest if it is small.
+3. One honest paragraph: how big is this, what should the page own, what should it not try to be.${RULES}
+JSON: {"tiers":{"primary":"","secondary":"","tertiary":"","trafficReality":""},
+"sizing":{"parentTerm":"","parentVolume":"","estimatedShare":"","likelyRange":"","pageType":"","rationale":""},
+"summary":""}`;}
+
+function qLinks(c){return `${HEAD(c)}
+
+EXISTING PAGES AND THEIR KEYWORDS:
+${evidenceBlock(70)}
+
+1. Conflicts: any keyword this new page wants that an existing page already targets. Name both, pick
+an owner, never assign one keyword twice. At most 6.
+2. Internal links: which existing pages this one should link TO and which should link BACK, with the
+anchor text. At most 8.${RULES}
+JSON: {"conflicts":[{"keyword":"","claimedBy":[""],"recommendedOwner":"","reasoning":""}],
+"internalLinks":[{"direction":"to","page":"","anchorText":"","reasoning":""}]}`;}
+
+function qEntities(c){return `${HEAD(c)}
+
+List at most 10 technical terms to weave into the copy for this service, each with the section it
+belongs in.${SCOPE(c)} Then write ONE sentence stating that entities follow different rules from keywords: no
+exact match, no assigned slot, no count, no density, and never a coverage percentage.${RULES}
+JSON: {"entities":[{"entity":"","whereItBelongs":""}],"entityRule":""}`;}
+
+function qExclusions(c,blind){return `${HEAD(c)}
+BLIND SPOTS found earlier: ${JSON.stringify((blind||[]).slice(0,5)).slice(0,1100)}
+PROXIMITY policy: ${c.noNear?'all proximity keywords are banned on this page (no Business Profile)':'proximity terms kept for tracking only'}.
+
+1. Exclusions with a reason class, at most 5. Only list keywords we should NOT target. Do not list a
+   keyword here that you also expect on the page.
+2. Retrofit: gaps to add to pages ALREADY published, at most 4.${RULES}
+JSON: {"excluded":[{"keyword":"","reasonClass":"","reason":""}],
+"retrofit":[{"existingPage":"","whatToAdd":"","why":""}]}`;}
+
+function qFlags(c){return `${HEAD(c)}
+
+List at most 7 things that must be verified before writing: unverified brands, error codes,
+statistics, regulations and local claims. For each give the claim and the exact source type needed.
+Keep every string under 20 words.${RULES}
+JSON: {"flags":[{"item":"","claim":"","verifyWith":""}]}`;}
+
+function qValidate(c,batch,n){return `${HEAD(c)}
+${SCOPE(c)}
+
+Below are ${batch.length} candidate keywords, numbered. Read EVERY one against the scope above and
+return ONLY the ones that do not belong. Judge each on four tests:
+
+1. WRONG SERVICE — it is about a different appliance, machine or trade than this page.
+2. NOT A SEARCH — it is a bare part name, a technical label, or a fragment nobody types into Google.
+3. WRONG INTENT — the searcher wants to buy, to read a manual, to do it themselves with no intention
+   of hiring, or something else this service page cannot satisfy.
+4. CANNIBALISES — it is really about an adjacent service listed as off this page, and would compete
+   with a page that should own it.
+
+Return nothing for a keyword that passes. Do not explain the ones that pass. Do not restate the list.
+If every keyword passes, return an empty array.
+
+KEYWORDS:
+${batch.map((k,i)=>`${n+i+1}. ${k}`).join('\n')}
+${RULES_BASE}
+JSON: {"violations":[{"keyword":"","test":"wrong_service","reason":""}]}`;}
+
+/* ---- master list assembled locally so a short reply can never lose keywords ---- */
+function buildMaster(){
+  const {s3,s4,s5}=S.stages,out=[],seen=new Set();
+  const fseen=new Set(); S.filtered=[];
+  const fil=(k,why)=>{const id=k.toLowerCase();if(fseen.has(id))return;fseen.add(id);S.filtered.push({keyword:k,why});};
+  const blockNear=el('noNear')&&el('noNear').checked;
+  const dropped=new Set((S.stages.s6?.excluded||[]).map(e=>String(e.keyword||'').trim().toLowerCase()));
+  const sc=S.scope||{};
+  const req=(sc.requiredTerms||[]).map(t=>t.toLowerCase()).filter(Boolean);
+  const ban=(sc.bannedTerms||[]).map(t=>t.toLowerCase()).filter(Boolean);
+  const add=(kw,family,origin,source,tier)=>{
+    if(!kw)return;const k=String(kw).trim();if(!k)return;
+    const low=' '+k.toLowerCase()+' ';
+    if(k.split(/\s+/).length<2){fil(k,'not a search phrase, it is a bare label or fragment');return;}
+    if(req.length&&!req.some(t=>low.includes(t))){
+      fil(k,'off scope, does not contain '+req.join(' or '));return;}
+    const hit=ban.find(t=>low.includes(' '+t+' ')||low.includes(' '+t)||low.includes(t+' '));
+    if(hit){fil(k,'belongs to another service, contains "'+hit+'"');return;}
+    if(blockNear&&NEARTEST.test(k)){fil(k,'proximity keyword, blocked because there is no Business Profile');return;}
+    if(dropped.has(k.toLowerCase())){fil(k,'flagged by the exclusions stage');return;}
+    const fam=normFam(family);
+    const id=(fam+'|'+k).toLowerCase();if(seen.has(id))return;seen.add(id);
+    out.push({keyword:k,family:fam,tier:tier||'',origin,source:source||''});};
+  (s3?.locationKeywords||[]).forEach(l=>add(l.keyword,'location','mapped',l.sourcePattern,l.tier));
+  (s3?.concepts||[]).forEach(cn=>(cn.newKeywords||[]).forEach(k=>add(k,cn.family||'other','mapped',cn.sourceKeyword||'')));
+  (s3?.brands||[]).forEach(b=>(b.keywords||[]).forEach(k=>add(k,'brand','mapped',b.brand)));
+  (s4?.expansions||[]).forEach(e=>(e.keywords||[]).forEach(o=>
+    add(o.keyword,e.family||'other','expanded',o.sourceConcept||e.conceptProved||'')));
+  const secs={physical:'type_variant',failures:'symptom',regulatory:'regulatory',localPhysical:'local',adjacent:'adjacent'};
+  Object.entries(secs).forEach(([sec,fam])=>(s5?.[sec]||[]).forEach(i=>
+    (i.keywords||[]).forEach(k=>add(k,fam,'orphan',i.aspect||i.customerWording||i.item||i.factor||i.service||''))));
+  return out;
+}
+const FAMSET=new Set(['location','colloquial','urgency','brand','symptom','type_variant','cost',
+ 'decision','question','parts','tenure_segment','proximity','competitor_brand','maintenance_prevention',
+ 'installation_replacement','warranty_insurance','emergency_after_hours','commercial_vs_residential',
+ 'seasonal','diy_boundary','regulatory','local','adjacent','other']);
+function normFam(f){
+  let x=String(f||'other').toLowerCase().trim().replace(/[\s-]+/g,'_');
+  if(FAMSET.has(x))return x;
+  if(/brand/.test(x))return 'brand';
+  if(/symptom|fault|problem/.test(x))return 'symptom';
+  if(/core|service|geo|city|location/.test(x))return 'location';
+  if(/part/.test(x))return 'parts';
+  if(/price|cost/.test(x))return 'cost';
+  if(/type|variant|fuel|config/.test(x))return 'type_variant';
+  if(/question|faq/.test(x))return 'question';
+  if(/urgen|emergency|same_day/.test(x))return 'urgency';
+  if(/rent|tenant|landlord|tenure/.test(x))return 'tenure_segment';
+  return 'other';
+}
+const NEARTEST=/\b(near me|nearby|near my|close to me|around me|in my area)\b/i;
+const merge=(k,r)=>{S.stages[k]={...(S.stages[k]||{}),...(r||{})};};
+
+/* ---- run ---- */
+el('stop').onclick=()=>{S.stop=true;log('Stopping after the current call.','wa');};
+el('run').onclick=async()=>{
+  if(S.running){log('Already running. Ignoring the extra click.','wa');return;}
+  S.running=true;el('run').disabled=true;
+  try{ await doRun(); } finally { S.running=false;el('run').disabled=false;el('stop').disabled=true; }
+};
+
+async function doRun(){
+  const c=ctx();
+  if(!c.svc||!c.city)return alert('Add the service and the city.');
+  if(!S.pages.length)return alert('Add at least one page of evidence, then run the pre-scan.');
+  if(!S.scope||!S.scope.confirmed){
+    alert('Confirm the scope first.\n\nStep 02 defines what this service is and what must stay off the page. It is the filter that stops another appliance\'s keywords leaking in.');
+    el('scopeOut').scrollIntoView({behavior:'smooth',block:'center'});return;
+  }
+  const mode=await probe();
+  if(mode==='none'){
+    el('phase').textContent='Cannot run: no connection.';
+    el('log').innerHTML='';
+    log('Nothing ran. There is no way to reach a model.','er');
+    log('Set "Who answers" to Claude at the top of this page, then press Run again.','er');
+    log('Claude needs no key and works inside this preview.','er');
+    el('srv').scrollIntoView({behavior:'smooth',block:'center'});return;
+  }
+  S.stop=false;S.fatal=null;S.calls=0;S.fails=0;S.kw=0;S.stages={};S.violations=[];S.filtered=[];S.t0=Date.now();
+  el('stop').disabled=false;el('log').innerHTML='';
+  el('results').classList.remove('show');metrics();
+  const pause=()=>sleep(parseInt(el('delay').value,10)||400);
+
+  const tasks=[
+    ['Patterns',                 ()=>qPatterns(c),                      r=>S.stages.s1=r||{}],
+    ['City conditions',          ()=>qCity(c),                          r=>merge('s2',r)],
+    ['Customer segments',        ()=>qIcp(c),                           r=>merge('s2',r)],
+    ['Families and blind spots', ()=>qFamilies(c),                      r=>merge('s2',r)],
+    ['Location keywords',        ()=>qLocation(c,S.stages.s1?.patterns),r=>merge('s3',r)],
+    ['Concept transfers',        ()=>qTransfer(c),                      r=>merge('s3',r)],
+    ['Brands carried over',      ()=>qBrandsMapped(c),                  r=>merge('s3',r)],
+  ];
+  c.fams.forEach(f=>tasks.push(['Expand: '+f,
+    ()=>qExpand(c,f,S.stages.s2?.cityContext,S.stages.s2?.icp,buildMaster().map(m=>m.keyword)),
+    r=>{if(r&&r.keywords){S.stages.s4=S.stages.s4||{expansions:[]};S.stages.s4.expansions.push(r);}}]));
+  tasks.push(
+    ['Blind: physical build',    ()=>qPhysical(c),                      r=>merge('s5',r)],
+    ['Blind: failure list',      ()=>qFailures(c),                      r=>merge('s5',r)],
+    ['Blind: rules and local',   ()=>qRegLocal(c),                      r=>merge('s5',r)],
+    ['Tiers, size, summary',     ()=>qJudge(c,buildMaster().length),    r=>merge('s6',r)],
+    ['Conflicts and links',      ()=>qLinks(c),                         r=>merge('s6',r)],
+    ['Entities',                ()=>qEntities(c),                          r=>merge('s6',r)],
+    ['Exclusions and retrofit', ()=>qExclusions(c,S.stages.s2?.blindSpots), r=>merge('s6',r)],
+    ['Verification flags',      ()=>qFlags(c),                             r=>merge('s6',r)],
+  );
+
+  for(let i=0;i<tasks.length;i++){
+    if(S.stop)break;
+    const [label,mk,into]=tasks[i];
+    el('phase').textContent=`${label} — step ${i+1} of ${tasks.length}`;
+    el('prog').style.width=Math.round(i/tasks.length*100)+'%';
+    log(`${i+1}/${tasks.length} ${label}`,'go');
+    const before=S.kw;
+    const r=await gemini(mk(),label);
+    if(r)into(r);else log(`  ${label}: nothing returned, moving on`,'wa');
+    countKw();
+    if(S.kw>before)log(`  +${S.kw-before} keywords (total ${S.kw})`,'ok');
+    if(S.fatal){log('Stopping: '+S.fatal,'er');break;}
+    if(i<tasks.length-1)await pause();
+  }
+
+  S.stages.s6=S.stages.s6||{};
+  S.stages.s6.masterList=buildMaster();
+
+  if(el('doValidate').checked && !S.stop && S.stages.s6.masterList.length){
+    const all=S.stages.s6.masterList.map(m=>m.keyword);
+    const size=35, batches=Math.ceil(all.length/size);
+    S.violations=[];
+    for(let b=0;b<batches;b++){
+      if(S.stop)break;
+      const slice=all.slice(b*size,(b+1)*size);
+      el('phase').textContent=`Validating keywords — batch ${b+1} of ${batches}`;
+      el('prog').style.width=Math.round(90+10*(b/batches))+'%';
+      log(`Validating ${b+1}/${batches} (${slice.length} keywords)`,'go');
+      const r=await gemini(qValidate(c,slice,b*size),`validation ${b+1}`);
+      const v=(r&&r.violations)||[];
+      if(v.length)log(`  ${v.length} flagged`,'wa'); else log('  all clear','ok');
+      S.violations=S.violations.concat(v);
+      if(b<batches-1)await pause();
+    }
+    if(S.violations.length){
+      const bad=new Set(S.violations.map(v=>String(v.keyword||'').trim().toLowerCase()));
+      S.stages.s6.masterList=S.stages.s6.masterList.filter(m=>{
+        if(bad.has(m.keyword.toLowerCase())){
+          const hit=S.violations.find(v=>String(v.keyword||'').toLowerCase()===m.keyword.toLowerCase());
+          S.filtered.push({keyword:m.keyword,why:'validation: '+(hit?.test||'failed')+' — '+(hit?.reason||'')});
+          return false;
+        }
+        return true;});
+      log(`Validation removed ${S.violations.length} keywords.`,'wa');
+    }
+  }
+  const cnt={mapped:0,expanded:0,orphan:0,total:S.stages.s6.masterList.length};
+  S.stages.s6.masterList.forEach(m=>{if(cnt[m.origin]!==undefined)cnt[m.origin]++;});
+  S.stages.s6.counts=cnt;
+  countKw();S.kw=S.stages.s6.masterList.length;metrics();
+  el('prog').style.width='100%';
+  el('phase').textContent=S.stop?'Stopped early. Showing what was built.':'Done.';
+  log(`Finished. ${cnt.total} keywords: ${cnt.mapped} mapped, ${cnt.expanded} expanded, ${cnt.orphan} orphan.`,'ok');
+  render(c);
+}
+
+/* ---- render ---- */
+function table(rows,cols,start){
+  if(!rows||!rows.length)return '<p class="sdesc">Nothing returned for this section.</p>';
+  const num=typeof start==='number';
+  const head=(num?'<th style="width:52px">#</th>':'')+cols.map(c=>`<th>${esc(c[0])}</th>`).join('');
+  const body=rows.map((r,ri)=>'<tr>'+(num?`<td class="mono" style="color:var(--flow)">${start+ri+1}</td>`:'')+cols.map(c=>{
+    let v=r[c[1]];if(Array.isArray(v))v=v.join(' · ');
+    if(c[1]==='tier'&&v)return `<td><span class="tag t${String(v).replace(/\D/g,'')||'x'}">T${String(v).replace(/\D/g,'')}</span></td>`;
+    return `<td>${esc(v)}</td>`;}).join('')+'</tr>').join('');
+  return `<div class="tw"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+const prov=(cls,t,x)=>`<div class="prov ${cls}"><h2>${esc(t)}</h2><p>${esc(x)}</p></div>`;
+function allKeywords(){
+  const m=S.stages.s6?.masterList||buildMaster();
+  const seen=new Set(),out=[];
+  m.forEach(r=>{const t=r.keyword.trim().toLowerCase();
+    if(t&&!seen.has(t)){seen.add(t);out.push(r.keyword.trim());}});
+  return out;
+}
+function renderFlat(){
+  const kws=allKeywords(),size=parseInt(el('chunk').value,10)||0;
+  let h=`<h2>Every keyword, plain list — ${kws.length} unique</h2>
+    <p class="sdesc">Deduplicated, one per line, nothing else. Paste straight into your volume tool.</p>`;
+  S.flatBlocks=[];
+  if(!size){
+    S.flatBlocks.push(kws.join('\n'));
+    h+=`<div class="cbox"><div class="cl">All ${kws.length} keywords</div>
+      <div class="flat" id="fb0">${esc(kws.join('\n'))}</div>
+      <button class="btn sm" data-copy="0">Copy all ${kws.length}</button></div>`;
+  } else {
+    for(let i=0;i<kws.length;i+=size){
+      const part=kws.slice(i,i+size), bi=S.flatBlocks.length;
+      S.flatBlocks.push(part.join('\n'));
+      h+=`<div class="cbox"><div class="cl">Block ${bi+1} — ${part.length} keywords</div>
+        <div class="flat" id="fb${bi}">${esc(part.join('\n'))}</div>
+        <button class="btn sm" data-copy="${bi}">Copy this block</button></div>`;
+    }
+  }
+  el('flatOut').innerHTML=h;
+  el('flatOut').querySelectorAll('[data-copy]').forEach(b=>{
+    const idx=parseInt(b.dataset.copy,10);
+    const label=b.textContent;
+    b.onclick=()=>copyText(S.flatBlocks[idx]||'', b, label, el('fb'+idx));
+  });
+}
+function render(c){
+  const{s1,s2,s3,s4,s5,s6}=S.stages;let h='';
+  if(S.scope)h+=`<h2>Scope this run was held to</h2><div class="note"><b>${esc(S.scope.productDefinition||'')}</b><br>
+    Every keyword had to contain: ${esc((S.scope.requiredTerms||[]).join(', ')||'no constraint')}<br>
+    No keyword could contain: ${esc((S.scope.bannedTerms||[]).join(', ')||'no constraint')}</div>`;
+  if(s6?.summary)h+=`<h2>The honest read</h2><div class="note">${esc(s6.summary)}</div>`;
+  if(s6?.counts)h+=`<h3>Where the keywords came from</h3>`+table([s6.counts],
+    [['Mapped','mapped'],['Expanded','expanded'],['Orphan','orphan'],['Total','total']]);
+  if(s6?.sizing)h+=`<h3>Sizing</h3>`+table([s6.sizing],
+    [['Parent term','parentTerm'],['Parent volume','parentVolume'],['Share','estimatedShare'],
+     ['Likely real range','likelyRange'],['Page type','pageType'],['Why','rationale']]);
+  if(s6?.tiers)h+=`<h3>Proposed tiers</h3>`+table([s6.tiers],
+    [['Primary','primary'],['Secondary','secondary'],['Tertiary','tertiary'],['Where traffic really comes from','trafficReality']]);
+
+  h+=prov('a','Section A — Mapped from your existing pages',
+   'Every keyword here has a direct ancestor in the data you pasted. The concept was already proven on another page. Only the service noun changed, or the wording was adjusted because this service fails differently. Each row names its source.');
+  if(s3?.locationKeywords)h+=`<h3>Location keywords</h3>`+table(s3.locationKeywords,
+    [['Keyword','keyword'],['Tier','tier'],['From pattern','sourcePattern']]);
+  if(s3?.concepts)h+=`<h3>Concept transfers</h3>`+table(s3.concepts,
+    [['Source keyword','sourceKeyword'],['Source page','sourcePage'],['Verdict','verdict'],
+     ['Customer situation','customerSituation'],['Role','role'],['New keywords','newKeywords'],['Why not a swap','whyNotASwap']]);
+  if(s3?.brands)h+=`<h3>Brands carried over from your list</h3>`+table(s3.brands,
+    [['Brand','brand'],['Makes this product?','status'],['Keywords','keywords'],['Note','note']]);
+
+  h+=prov('b','Section B — Expanded from the concepts',
+   'None of these were in your source list. Your data proved this audience searches by brand, by symptom, by question and by cost. This section takes each proven concept and researches what it produces for this service in this city. Each keyword names the concept it grew from.');
+  if(s4?.expansions?.length)s4.expansions.forEach(e=>{
+    h+=`<h3>${esc(e.family)} — ${(e.keywords||[]).length} keywords</h3>`;
+    h+=`<div class="note"><b>Concept your data proved:</b> ${esc(e.conceptProved)}<br>
+        <b>What the research established:</b> ${esc(e.researchFindings)}</div>`;
+    h+=table(e.keywords||[],[['New keyword','keyword'],['Expanded from','sourceConcept'],['Note','note']]);
+    if(e.brandVerification?.length)h+=table(e.brandVerification,
+      [['Brand','brand'],['Makes this product?','status'],['Verify with','verifyWith']]);
+  });else h+='<p class="sdesc">Expansion returned nothing.</p>';
+
+  h+=prov('c','Section C — The gap, with no ancestor',
+   'Nothing in your existing pages could have pointed at any of this. It was derived from the service itself, deliberately without seeing sections A or B, so it is not anchored by what the transfer already found. This is usually where the page beats a competitor working from a template.');
+  if(s5){
+    if(s5.physical)h+=`<h3>Physical decomposition</h3>`+table(s5.physical,[['Aspect','aspect'],['Detail','detail'],['Keywords','keywords']]);
+    if(s5.failures)h+=`<h3>Failures from documentation</h3>`+table(s5.failures,
+      [['Technical name','technicalName'],['How a customer says it','customerWording'],['Cause','cause'],['Keywords','keywords'],['Verify with','verification']]);
+    if(s5.regulatory)h+=`<h3>Regulatory and safety</h3>`+table(s5.regulatory,[['Item','item'],['Detail','detail'],['Keywords','keywords'],['Verify with','verification']]);
+    if(s5.localPhysical)h+=`<h3>Local conditions</h3>`+table(s5.localPhysical,[['Factor','factor'],['Effect','effect'],['Keywords','keywords'],['Verify with','verification']]);
+    if(s5.adjacent)h+=`<h3>Adjacent demand</h3>`+table(s5.adjacent,[['Service','service'],['Own page?','ownPage'],['Keywords','keywords']]);
+  }
+  if(s2?.blindSpots)h+=`<h3>Blind spots in your existing research</h3>`+table(s2.blindSpots,
+    [['Family','family'],['Verdict','verdict'],['Why','reasoning'],['Autocomplete seed','autocompleteSeed'],['PAA query','paaQuery'],['Retrofit?','retrofitExisting']]);
+
+  if(s6?.masterList){
+    h+=`<h2>Master list by family</h2>`;
+    const by={};s6.masterList.forEach(k=>{(by[k.family||'other']||=[]).push(k);});
+    let run=0;
+    Object.keys(by).sort().forEach(f=>{
+      h+=`<h3>${esc(f)} — ${by[f].length} <span class="sdesc" style="font-weight:400">(${run+1} to ${run+by[f].length})</span></h3>`
+        +table(by[f],[['Keyword','keyword'],['Tier','tier'],['Origin','origin'],['Source','source']],run);
+      run+=by[f].length;});
+  }
+  if(s6?.retrofit)h+=`<h2>Retrofit into published pages</h2>`+table(s6.retrofit,[['Existing page','existingPage'],['What to add','whatToAdd'],['Why','why']]);
+  if(s6?.internalLinks)h+=`<h2>Internal links</h2>`+table(s6.internalLinks,[['Direction','direction'],['Page','page'],['Anchor text','anchorText'],['Why','reasoning']]);
+  if(s6?.conflicts)h+=`<h2>Page conflicts</h2>`+table(s6.conflicts,[['Keyword','keyword'],['Claimed by','claimedBy'],['Recommended owner','recommendedOwner'],['Why','reasoning']]);
+  if(s6?.entities){h+=`<h2>Entities</h2>`;if(s6.entityRule)h+=`<div class="note">${esc(s6.entityRule)}</div>`;
+    h+=table(s6.entities,[['Entity','entity'],['Where it belongs','whereItBelongs']]);}
+  if(s6?.excluded)h+=`<h2>Excluded</h2>`+table(s6.excluded,[['Keyword','keyword'],['Reason class','reasonClass'],['Reason','reason']]);
+  if(s6?.flags)h+=`<h2>Verify before writing</h2>`+table(s6.flags,[['Item','item'],['Claim','claim'],['Verify with','verifyWith']]);
+  if(s1?.patterns)h+=`<h2>Pattern tiers</h2>`+(s1.provisional?`<div class="note"><b>Provisional.</b> ${esc(s1.tierNotes||'')}</div>`:'')
+    +table(s1.patterns,[['Pattern','pattern'],['Tier','tier'],['Sources','sources'],['Reasoning','reasoning']]);
+  if(s2?.cityContext)h+=`<h2>City context</h2>`+table(s2.cityContext,[['Factor','factor'],['Detail','detail'],['Effect on service','effectOnService'],['Verify with','verification']]);
+  if(s2?.icp)h+=`<h3>ICP segments</h3>`+table(s2.icp,[['Segment','segment'],['Trigger','trigger'],['Decision driver','decisionDriver'],['Section it needs','sectionItNeeds']]);
+
+  if(S.violations&&S.violations.length){
+    h+=`<h2>Validation pass — ${S.violations.length} removed</h2>`
+      +`<p class="sdesc">Every keyword was read back against the confirmed scope. These failed and were taken out of the list below.</p>`
+      +table(S.violations,[['Keyword','keyword'],['Failed test','test'],['Reason','reason']],0);
+  }
+  if(S.filtered&&S.filtered.length){
+    h+=`<h2>Removed before the final list — ${S.filtered.length}</h2>`
+      +`<p class="sdesc">Proximity keywords blocked by policy, plus anything the exclusions stage flagged. They are recorded here rather than silently dropped.</p>`
+      +table(S.filtered,[['Keyword','keyword'],['Why','why']],0);
+  }
+  h+=`<div id="flatOut"></div>`;
+  el('out').innerHTML=h;renderFlat();
+  el('results').classList.add('show');
+  S.md=toMd(c);
+  el('results').scrollIntoView({behavior:'smooth'});
+}
+el('chunk').onchange=()=>{if(el('results').classList.contains('show'))renderFlat();};
+
+/* ---- export ---- */
+function toMd(c){
+  const{s1,s2,s3,s4,s5,s6}=S.stages;
+  let m=`# ${c.svc} — ${c.city}, ${c.state}\n\nKeyword candidates: mapped, expanded, derived.\n\n`;
+  if(s6?.summary)m+=`## Honest read\n\n${s6.summary}\n\n`;
+  if(s6?.counts)m+=`## Origin counts\n\n${Object.entries(s6.counts).map(([k,v])=>`- **${k}:** ${v}`).join('\n')}\n\n`;
+  if(s6?.tiers)m+=`## Tiers\n\n${Object.entries(s6.tiers).map(([k,v])=>`- **${k}:** ${v}`).join('\n')}\n\n`;
+  const dump=(t,o)=>{if(o)m+=`### ${t}\n\n\`\`\`json\n${JSON.stringify(o,null,2)}\n\`\`\`\n\n`;};
+  m+=`## Section A — Mapped\n\n`;dump('Location',s3?.locationKeywords);dump('Transfers',s3?.concepts);dump('Brands',s3?.brands);
+  m+=`## Section B — Expanded\n\n`;dump('Expansions',s4?.expansions);
+  m+=`## Section C — Gap\n\n`;dump('Blind derivation',s5);dump('Blind spots',s2?.blindSpots);
+  dump('Master list',s6?.masterList);dump('Retrofit',s6?.retrofit);dump('Internal links',s6?.internalLinks);
+  dump('Conflicts',s6?.conflicts);dump('Entities',s6?.entities);dump('Excluded',s6?.excluded);
+  dump('Flags',s6?.flags);dump('Patterns',s1?.patterns);dump('City context',s2?.cityContext);dump('ICP',s2?.icp);
+  const k=allKeywords();
+  m+=`## Every keyword (${k.length} unique)\n\n\`\`\`\n${k.join('\n')}\n\`\`\`\n`;
+  return m;
+}
+async function copyText(text, btn, label, selectEl){
+  let ok=false;
+  try{ await navigator.clipboard.writeText(text); ok=true; }catch(e){}
+  if(!ok){
+    try{
+      const ta=document.createElement('textarea');
+      ta.value=text;
+      ta.setAttribute('readonly','');
+      ta.style.cssText='position:fixed;top:0;left:0;width:1px;height:1px;opacity:0';
+      document.body.appendChild(ta);
+      ta.select(); ta.setSelectionRange(0,text.length);
+      ok=document.execCommand('copy');
+      document.body.removeChild(ta);
+    }catch(e){}
+  }
+  if(!ok && selectEl){
+    try{
+      const r=document.createRange(); r.selectNodeContents(selectEl);
+      const s=window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    }catch(e){}
+  }
+  btn.textContent = ok ? 'Copied' : 'Selected — press Ctrl+C';
+  btn.classList.toggle('done', ok);
+  setTimeout(()=>{ btn.textContent=label; btn.classList.remove('done'); }, ok?1600:4000);
+  return ok;
+}
+
+function dl(n,t,ty){const b=new Blob([t],{type:ty}),u=URL.createObjectURL(b);
+  const a=document.createElement('a');a.href=u;a.download=n;a.click();URL.revokeObjectURL(u);}
+const slug=()=>(el('svc').value+'-'+el('city').value).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+el('copyFlat').onclick=e=>copyText(allKeywords().join('\n'), e.target,
+  'Copy every keyword, plain list', el('fb0'));
+el('copyMd').onclick=e=>copyText(S.md||'', e.target, 'Copy as Markdown');
+el('dlMd').onclick=()=>dl(slug()+'-keywords.md',S.md,'text/markdown');
+el('dlJson').onclick=()=>dl(slug()+'-raw.json',JSON.stringify(S.stages,null,2),'application/json');
+el('dlCsv').onclick=()=>{const k=S.stages.s6?.masterList||buildMaster();
+  const csv='keyword,family,tier,origin,source\n'+k.map(r=>[r.keyword,r.family,r.tier,r.origin,r.source]
+    .map(v=>`"${String(v==null?'':v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  dl(slug()+'-keywords.csv',csv,'text/csv');};
+</script>
+</body>
+</html>

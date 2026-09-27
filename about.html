@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>How Pattern Transfer works</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#0F1C1A;--panel:#162523;--panel2:#1C2E2B;--line:#2B403C;--text:#D9E2DD;--dim:#8DA49E;
+ --bright:#F2F7F4;--signal:#E3A63C;--flow:#79B7AA;--warn:#D98A6B;--r:3px;
+ box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--ink);color:var(--text);
+ font-family:Archivo,"Helvetica Neue",Helvetica,Arial,sans-serif;font-size:16.5px;line-height:1.7}
+.wrap{max-width:780px;margin:0 auto;padding:0 20px}
+h1{font-size:clamp(28px,5vw,44px);margin:0 0 10px;font-weight:700;letter-spacing:-.02em;color:var(--bright)}
+h2{font-size:clamp(21px,3vw,27px);margin:46px 0 12px;font-weight:600;color:var(--bright);letter-spacing:-.01em}
+h3{font-size:18px;margin:30px 0 8px;font-weight:600;color:var(--flow)}
+p{margin:0 0 15px}
+a{color:var(--signal)}
+header{border-bottom:1px solid var(--line);padding:44px 0 28px;
+ background:radial-gradient(700px 240px at 14% -40%,rgba(227,166,60,.10),transparent 70%)}
+.sub{color:var(--flow);font-weight:500;margin:0 0 6px}
+.box{border:1px solid var(--line);background:var(--panel);padding:18px 20px;margin:22px 0}
+.box h3{margin-top:0}
+.ex{border-left:3px solid var(--flow);background:var(--panel2);padding:16px 18px;margin:20px 0}
+.ex .t{color:var(--flow);font-size:13px;font-weight:600;margin-bottom:8px;
+ font-family:"IBM Plex Mono",monospace}
+.ex p:last-child{margin-bottom:0}
+.kw{font-family:"IBM Plex Mono",monospace;font-size:14px;background:var(--panel2);
+ border:1px solid var(--line);padding:2px 7px;display:inline-block;margin:2px 3px 2px 0}
+.bad{color:var(--warn)}
+.good{color:var(--flow)}
+ul,ol{margin:0 0 16px;padding-left:22px}
+li{margin-bottom:8px}
+figure{margin:30px 0}
+figure svg{width:100%;height:auto;display:block;border:1px solid var(--line);background:var(--panel)}
+figcaption{color:var(--dim);font-size:13.5px;margin-top:8px}
+.top{display:inline-block;margin-bottom:26px;font-size:14px}
+footer{border-top:1px solid var(--line);margin-top:56px;padding:26px 0 70px;color:var(--dim);font-size:14px}
+:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+</style>
+</head>
+<body>
+
+<header><div class="wrap">
+  <p class="sub">Pattern Transfer</p>
+  <h1>How this tool works</h1>
+  <p style="color:var(--dim);margin:0">Written plainly, with real examples.</p>
+</div></header>
+
+<main class="wrap">
+<a class="top" href="index.html">Back to the tool</a>
+
+<h2>The problem this solves</h2>
+
+<p>You want to build a page about a small service in a small town. Something like oven repair in Flagstaff.</p>
+
+<p>You type it into a keyword tool. The tool says zero. You try a few other ways of writing it. Still zero.</p>
+
+<p>That does not mean nobody searches for it. It means the number is too small for the tool to see. Most tools stop counting below about ten searches a month. Everything under that line shows up as zero or as ten, whether the real number is two or nine.</p>
+
+<p>So you are stuck. You cannot look up the keywords, and there is no competitor page in your town to copy ideas from.</p>
+
+<div class="box">
+<h3>The idea behind the fix</h3>
+<p>You have already built other pages in the same town. A home page. A fridge repair page. A washer repair page. Those pages had real numbers.</p>
+<p>The people searching for those pages are the same people who will search for this one. Same town. Same kind of problem. Same habits.</p>
+<p>So the old pages can teach you <b>how people in your town word things</b>, even though they cannot tell you how many people will search.</p>
+</div>
+
+<h2>The three things the tool does</h2>
+
+<figure>
+<svg viewBox="0 0 900 560" role="img" aria-label="Flow diagram of the tool's three passes">
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#79B7AA"/>
+    </marker>
+    <marker id="ag" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#E3A63C"/>
+    </marker>
+    <style>
+      .bx{fill:#1C2E2B;stroke:#2B403C}
+      .lb{fill:#F2F7F4;font:600 15px Archivo,sans-serif}
+      .sm{fill:#8DA49E;font:13px Archivo,sans-serif}
+      .tiny{fill:#8DA49E;font:11.5px "IBM Plex Mono",monospace}
+      .ln{stroke:#79B7AA;stroke-width:1.6;fill:none}
+      .lo{stroke:#E3A63C;stroke-width:1.6;fill:none;stroke-dasharray:5 4}
+    </style>
+  </defs>
+
+  <!-- input -->
+  <rect class="bx" x="30" y="24" width="250" height="86" rx="3"/>
+  <text class="lb" x="46" y="52">Your old pages</text>
+  <text class="sm" x="46" y="74">Home page, fridge page,</text>
+  <text class="sm" x="46" y="92">washer page, with keywords</text>
+
+  <!-- new service -->
+  <rect class="bx" x="620" y="24" width="250" height="86" rx="3" stroke="#E3A63C"/>
+  <text class="lb" x="636" y="52">The new service</text>
+  <text class="sm" x="636" y="74">Oven repair in Flagstaff.</text>
+  <text class="sm" x="636" y="92">No numbers, no competitor.</text>
+
+  <!-- A -->
+  <rect class="bx" x="30" y="170" width="250" height="118" rx="3"/>
+  <text class="lb" x="46" y="198">A. Map</text>
+  <text class="sm" x="46" y="222">Take a keyword you already</text>
+  <text class="sm" x="46" y="240">have and swap the service</text>
+  <text class="sm" x="46" y="258">word for the new one.</text>
+  <text class="tiny" x="46" y="278">has a parent in your data</text>
+
+  <!-- B -->
+  <rect class="bx" x="325" y="170" width="250" height="118" rx="3"/>
+  <text class="lb" x="341" y="198">B. Expand</text>
+  <text class="sm" x="341" y="222">Spot the habit behind the</text>
+  <text class="sm" x="341" y="240">keyword, then research what</text>
+  <text class="sm" x="341" y="258">that habit means here.</text>
+  <text class="tiny" x="341" y="278">new, but grown from your data</text>
+
+  <!-- C -->
+  <rect class="bx" x="620" y="170" width="250" height="118" rx="3" stroke="#E3A63C"/>
+  <text class="lb" x="636" y="198">C. Derive</text>
+  <text class="sm" x="636" y="222">Look at the machine itself.</text>
+  <text class="sm" x="636" y="240">Find what no old page could</text>
+  <text class="sm" x="636" y="258">ever have told you.</text>
+  <text class="tiny" x="636" y="278">no parent at all</text>
+
+  <!-- arrows in -->
+  <path class="ln" d="M155 110 L155 168" marker-end="url(#ar)"/>
+  <path class="ln" d="M155 110 L155 140 L450 140 L450 168" marker-end="url(#ar)"/>
+  <path class="lo" d="M745 110 L745 168" marker-end="url(#ag)"/>
+
+  <!-- note on blindness -->
+  <text class="tiny" x="620" y="322">C never sees A or B, on purpose</text>
+
+  <!-- merge -->
+  <rect class="bx" x="230" y="372" width="440" height="80" rx="3"/>
+  <text class="lb" x="252" y="402">One list, every keyword labelled</text>
+  <text class="sm" x="252" y="426">mapped · expanded · orphan, so you can always see where it came from</text>
+
+  <path class="ln" d="M155 288 L155 342 L430 342 L430 370" marker-end="url(#ar)"/>
+  <path class="ln" d="M450 288 L450 370" marker-end="url(#ar)"/>
+  <path class="lo" d="M745 288 L745 342 L470 342 L470 370" marker-end="url(#ag)"/>
+
+  <!-- out -->
+  <rect class="bx" x="230" y="492" width="440" height="52" rx="3" stroke="#E3A63C"/>
+  <text class="lb" x="252" y="524">Plain list, ready for your volume tool</text>
+  <path class="ln" d="M450 452 L450 490" marker-end="url(#ar)"/>
+</svg>
+<figcaption>Three passes, then one list. The third pass runs blind so it is not steered by the first two.</figcaption>
+</figure>
+
+<h2>Pass A. Map what you already have</h2>
+
+<p>This is the simple part. A keyword you already own gets the service word swapped.</p>
+
+<div class="ex">
+<div class="t">EXAMPLE</div>
+<p><span class="kw">appliance repair flagstaff</span> becomes <span class="kw">oven repair flagstaff</span></p>
+<p>Your old page proved people in your town write the service first and the town second. So the new page should too.</p>
+</div>
+
+<p>But a swap is not always right. Sometimes the idea is good and the words are wrong.</p>
+
+<div class="ex">
+<div class="t">EXAMPLE OF A SWAP THAT WOULD FAIL</div>
+<p>Your washer page has <span class="kw">washer not draining</span>.</p>
+<p>Swap the word and you get <span class="kw bad">oven not draining</span>. Nobody searches that. Ovens do not drain.</p>
+<p>So the tool asks a better question: <b>what job was that keyword doing?</b> It was the "the machine ran but the job is not done" complaint. For an oven, that same complaint is <span class="kw good">oven not heating evenly</span> or <span class="kw good">oven takes too long to preheat</span>.</p>
+<p>Same job. Different words. That is what the tool means by matching on role.</p>
+</div>
+
+<p>Every keyword in Pass A shows you which old keyword it came from. If it cannot name a parent, it does not belong in this pass.</p>
+
+<h2>Pass B. Expand the habits</h2>
+
+<p>This is the part that adds the most.</p>
+
+<p>Your old pages do not just contain keywords. They contain <b>proof of habits</b>.</p>
+
+<div class="ex">
+<div class="t">EXAMPLE</div>
+<p>Your washer page had <span class="kw">samsung washer repair</span> and <span class="kw">whirlpool washer repair</span>.</p>
+<p>A simple tool would swap them into <span class="kw bad">samsung oven repair</span> and stop there.</p>
+<p>This tool reads it differently. Those keywords prove that <b>people in your town search by brand</b>. That is the habit. The brands themselves are just the examples.</p>
+<p>So it asks a new question: which brands make ovens, and which of those show up in Flagstaff homes? That brings in names your washer page never had, like Thermador, Viking and Wolf for higher-value homes, and it drops any brand that does not make ovens at all.</p>
+<p>You get brand keywords that were <b>never in your old list</b>, and each one tells you it came from the brand habit.</p>
+</div>
+
+<p>The same thing happens with questions.</p>
+
+<div class="ex">
+<div class="t">EXAMPLE</div>
+<p>Your fridge page had <span class="kw">why is my fridge not cooling</span>.</p>
+<p>That proves people ask "why is my thing doing this" questions. The habit is what matters.</p>
+<p>So the tool writes oven questions from scratch, and it writes different ones for different people. A renter asks <span class="kw">who pays for oven repair in a rental</span>. A homeowner asks <span class="kw">is it worth fixing a 12 year old oven</span>. A holiday-let owner asks <span class="kw">emergency oven repair flagstaff</span>.</p>
+<p>Same habit. Three different searches, because three different people.</p>
+</div>
+
+<p>The tool does this for every habit it finds: brands, symptoms, parts, questions, cost, repair-or-replace, machine types, urgency, and more.</p>
+
+<h2>Pass C. Find what nothing could tell you</h2>
+
+<p>Here is the catch with the first two passes. They can only grow from what you already have. If none of your old pages ever touched an idea, no amount of clever transfer will find it.</p>
+
+<div class="ex">
+<div class="t">THE CLEAREST EXAMPLE</div>
+<p>Every washing machine runs on electricity. Every fridge runs on electricity.</p>
+<p>But about half of all ovens and dryers run on <b>gas</b>.</p>
+<p>A gas oven and an electric oven break in completely different ways. A gas one has an igniter and a gas valve. An electric one has a heating element. The parts are different, the repair is different, and the safety risk is different.</p>
+<p>This is the single most important fact about oven repair. And <b>nothing in your washer or fridge keywords could ever point at it</b>, because neither machine has a fuel type.</p>
+</div>
+
+<p>So Pass C ignores your keywords completely. It looks at the machine.</p>
+
+<ul>
+<li><b>What is it made of?</b> Power source, fuel type, water and gas lines, vents, how it is fitted into the room.</li>
+<li><b>How does it break?</b> Not guessed. Taken from the lists makers publish: parts diagrams, error codes, repair manuals. Every named part is a thing that can fail, and a thing someone might search.</li>
+<li><b>What are the rules?</b> Permits, licences, safety risks, warranty and insurance.</li>
+<li><b>What about this town?</b> Flagstaff sits high up and gets cold. Does that change anything for this machine? Sometimes yes, sometimes no. The tool checks instead of assuming.</li>
+<li><b>What comes next?</b> Jobs this one leads to.</li>
+</ul>
+
+<p>Pass C runs <b>before it sees Pass A or B</b>. That is on purpose. If it saw them first, it would only find gaps they already hinted at, and it would miss the rest.</p>
+
+<h2>Why the order matters</h2>
+
+<p>After Pass C finishes, the tool compares it against A and B. Anything already covered gets marked as covered. Anything left over is called an <b>orphan</b>.</p>
+
+<p>Orphans are the best part of the whole run. They are the things your competitors will not have, because most people build a new page by copying an old one. If you copy, you inherit. If you inherit, you miss whatever the first page missed.</p>
+
+<div class="box">
+<h3>The blind spot problem</h3>
+<p>There is a risk with any method like this. If your very first page missed an idea, every page built from it misses the same idea. The mistake spreads.</p>
+<p>So the tool also checks your old pages for gaps. It has a list of the kinds of searches a local service page should normally have. If one is completely missing from what you pasted, it says so and gives you a way to check.</p>
+<p>It will also tell you when a gap should be added back into pages you have <b>already published</b>, not just this new one.</p>
+</div>
+
+<h2>What you get at the end</h2>
+
+<ol>
+<li><b>Section A</b> — keywords mapped from your old pages, each showing its parent.</li>
+<li><b>Section B</b> — keywords grown from the habits, each showing the habit it came from.</li>
+<li><b>Section C</b> — keywords from the machine itself, with nothing behind them in your old data.</li>
+<li><b>One master list</b>, sorted into groups, with a label on every keyword saying which pass built it.</li>
+<li><b>A plain list</b> at the bottom. No headings. No groups. Just keywords, one per line, ready to paste into a volume tool.</li>
+</ol>
+
+<p>You also get internal link ideas, clashes with your other pages, terms to use in the writing, and a list of anything that needs checking before you publish.</p>
+
+<h2>When to use it</h2>
+
+<p><b>Use it when</b> the obvious keyword shows nothing, and you have already built at least two other pages in the same town.</p>
+
+<p><b>Do not bother when</b> the keyword has real numbers. Normal research is faster. And do not use it for your first two pages, because there is nothing to learn from yet.</p>
+
+<h2>What it cannot do</h2>
+
+<p><b>It cannot find search volume.</b> Nothing can, below the line where tools stop counting. This builds the best possible list. Checking the numbers is a separate job, and that is why the plain list at the bottom exists.</p>
+
+<p><b>It cannot check facts.</b> The model will happily write an error code that does not exist. Every brand, code, statistic and rule comes back marked for checking. Check them.</p>
+
+<p><b>It cannot replace real data.</b> Once a page has been live for two months, the search report from Google will tell you more about your town than any tool. Use this to launch a page. Use the real report to grow it.</p>
+
+<a class="top" href="index.html" style="margin-top:34px">Back to the tool</a>
+</main>
+
+<footer><div class="wrap"><p>Pattern Transfer builds candidate keywords. It does not verify facts and it does not measure demand.</p></div></footer>
+</body>
+</html>

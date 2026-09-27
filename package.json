@@ -1,0 +1,6 @@
+{
+  "name": "pattern-transfer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Keyword candidate builder for local service pages with no measurable volume."
+}
