@@ -598,6 +598,8 @@ Examples of what is NOT a keyword and must never be output: "no heat", "thermost
 };
 
 async function doScope(){
+  const live=el('scopeNotes');
+  if(live&&live.value.trim())S.scopeNotes=live.value.trim();
   const c=ctx();
   if(!c.svc||!c.city)return alert('Add the service and the city first.');
   if(!await connect()){alert('No API connection.\n\nCheck the message at the top of the page.');
@@ -606,7 +608,7 @@ async function doScope(){
   const say=t=>{btn.textContent=t;};
   S.t0=S.t0||Date.now();
 
-  say('Step 1 of 2: what this service is...');
+  say(S.scopeNotes?'Revising with your notes, step 1 of 2...':'Step 1 of 2: what this service is...');
   const A=await gemini(qScopeA(c),'scope A');
   if(!A){ say('Analyse the service'); btn.disabled=false;
     el('scopeOut').classList.remove('hide');
@@ -622,7 +624,7 @@ async function doScope(){
 
   S.changes=[].concat(A.changes||[],(B&&B.changes)||[]);
   S.pushback=[].concat(A.pushback||[],(B&&B.pushback)||[]);
-  S.lastNotes=S.scopeNotes||'';
+  S.lastNotes=S.scopeNotes||'';   // kept visible in the box so it can be edited and re-run
 
   const noun=c.svc.replace(/\s*(repair|service|fix|cleaning)\s*$/i,'').trim();
   const noun2=c.root2?c.root2.replace(/\s*(repair|service|fix|cleaning)\s*$/i,'').trim():'';
@@ -701,9 +703,20 @@ function renderScope(){
     <button class="btn solid" id="confirmScope">Confirm scope and unlock the run</button>`;
   el('scopeOut').classList.remove('hide');
 
+  const nb=el('scopeNotes');
+  if(nb){
+    if(S.scopeNotes)nb.value=S.scopeNotes;           // survive a re-render
+    nb.addEventListener('input',()=>{S.scopeNotes=nb.value;});
+  }
   el('redoScope').onclick=()=>{
-    const n=el('scopeNotes').value.trim();
-    if(!n){alert('Write a note first.\n\nRe-analysing with an empty box would just regenerate the scope for no reason, which is exactly the drift you noticed.');return;}
+    const live=el('scopeNotes');
+    const n=((live&&live.value)||S.scopeNotes||'').trim();
+    if(!n){
+      if(live){live.focus();live.style.borderColor='var(--bad)';
+        setTimeout(()=>{live.style.borderColor='';},2500);}
+      log('Re-analyse needs a note. Type what you want changed in the box, then press it again.','wa');
+      return;
+    }
     S.scopeNotes=n;doScope();};
   el('confirmScope').onclick=()=>{
     const split=v=>v.split(',').map(x=>x.trim()).filter(Boolean);
