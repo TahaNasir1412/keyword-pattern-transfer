@@ -105,33 +105,58 @@ module.exports = async function handler(req, res) {
     const isGroq = provider === 'groq';
     const base = isGroq ? GROQ_BASE : (process.env.OPENAI_BASE_URL || '').replace(/\/+$/, '');
     const key = isGroq ? process.env.GROQ_API_KEY : process.env.OPENAI_API_KEY;
-    const model = body.model || (isGroq ? 'llama-3.3-70b-versatile' : 'gpt-4o-mini');
+    const model = body.model || process.env.GROQ_MODEL || process.env.OPENAI_MODEL
+      || (isGroq ? 'llama-3.3-70b-versatile' : 'gpt-4o-mini');
 
     if (!base) {
       return res.status(500).json({ error: 'OPENAI_BASE_URL is not set, so the OpenAI-compatible provider cannot be used.' });
     }
 
-    const r = await fetch(base + '/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
-      body: JSON.stringify({
+    // Many free models cap completion tokens well below 16k, so keep this modest.
+    const cap = Math.min(maxTokens, 8000);
+
+    async function ask(useJsonMode) {
+      const payload = {
         model: model,
         temperature: temperature,
-        max_tokens: maxTokens,
-        response_format: { type: 'json_object' },
+        max_tokens: cap,
         messages: [{ role: 'user', content: prompt }]
-      })
-    });
+      };
+      if (useJsonMode) payload.response_format = { type: 'json_object' };
+      const rr = await fetch(base + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+        body: JSON.stringify(payload)
+      });
+      const txt = await rr.text();
+      let js = null;
+      try { js = JSON.parse(txt); } catch (e) {}
+      return { rr: rr, js: js, txt: txt };
+    }
 
-    const raw = await r.text();
-    let data;
-    try { data = JSON.parse(raw); }
-    catch (e) { return res.status(502).json({ error: 'Provider returned a non-JSON response.', sample: raw.slice(0, 300) }); }
+    let out = await ask(true);
+    // Some models reject JSON mode outright. Try again without it before giving up.
+    if (!out.rr.ok && out.rr.status === 400) out = await ask(false);
+
+    const r = out.rr;
+    const data = out.js;
+
+    if (!data) {
+      return res.status(502).json({
+        error: 'Provider returned a non-JSON response.',
+        sample: out.txt.slice(0, 300), provider: provider, model: model
+      });
+    }
 
     if (!r.ok) {
+      const msg = (data && data.error && (data.error.message || data.error.code || data.error)) || ('Provider returned ' + r.status);
       return res.status(r.status).json({
-        error: (data && data.error && (data.error.message || data.error)) || ('Provider returned ' + r.status),
-        status: r.status, provider: provider
+        error: typeof msg === 'string' ? msg : JSON.stringify(msg),
+        status: r.status, provider: provider, model: model,
+        hint: r.status === 404 || /decommission|not found|does not exist/i.test(String(msg))
+          ? 'That model name is no longer available. Open console.groq.com/docs/models and set GROQ_MODEL in Vercel to a current one.'
+          : (r.status === 401 ? 'The key was rejected. Check GROQ_API_KEY in Vercel and redeploy.'
+          : (r.status === 429 ? 'Rate limited. Wait a minute and run again.' : undefined))
       });
     }
 
