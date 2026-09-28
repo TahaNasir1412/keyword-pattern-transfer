@@ -505,14 +505,32 @@ function countKw(){
 /* ================= SCOPE: what this service is, and is not ================= */
 S.scope=null;
 
-function qScopeA(c){return `You are a local SEO strategist about to research keywords for one service page.
+function qScopeA(c){
+const prev=S.scope;
+const revising=Boolean(prev&&S.scopeNotes);
+return `You are a local SEO strategist about to research keywords for one service page.
 
 SERVICE TERM: "${c.svc}"${c.root2?` (also written "${c.root2}")`:''}
 CITY: ${c.city}, ${c.state}
-${S.scopeNotes?`
-OPERATOR INSTRUCTIONS, these override your own judgement. Apply them exactly:
-${S.scopeNotes}`:''}
+${revising?`
+YOU ARE REVISING AN EXISTING SCOPE, NOT WRITING A NEW ONE.
 
+PREVIOUS SCOPE:
+${JSON.stringify({productDefinition:prev.productDefinition,includes:prev.includes,excludes:prev.excludes,ambiguities:prev.ambiguities}).slice(0,2600)}
+
+THE OPERATOR'S NOTES:
+${S.scopeNotes}
+
+RULES FOR REVISING:
+1. Change ONLY what the notes require. Everything the notes do not mention must come back BYTE FOR
+   BYTE IDENTICAL to the previous scope. Do not reword, reorder or improve anything else.
+2. Record every change you make in "changes", saying which note caused it. If you change something
+   no note asked for, you must still record it and justify it, and you should almost never do this.
+3. If a note is wrong, or would damage the page, SAY SO in "pushback". Give your reasoning and state
+   whether you applied it anyway. The operator has asked to be argued with when they are mistaken.
+   Apply the note unless it is factually wrong, in which case explain and apply the correct version.
+4. Never silently ignore a note. Every note appears in "changes" or in "pushback" or both.
+`:''}
 Define what this page is about. Be brief and concrete.
 - productDefinition: what this machine or service physically is. Under 30 words.
 - customerCalls: words real customers use for it. At most 4.
@@ -520,19 +538,36 @@ Define what this page is about. Be brief and concrete.
 - excludes: neighbouring services that must NOT appear here. At most 5. Include every appliance that
   sits near this one or shares a room with it. Keep "why" under 10 words.
 - ambiguities: other readings of the phrase that are NOT ours. At most 2.
+${revising?`- changes: at most 6, each under 20 words.
+- pushback: at most 3, only where you disagree with a note.`:'- changes and pushback: return empty arrays, this is the first pass.'}
 ${RULES_BASE}
 JSON: {"productDefinition":"","customerCalls":[""],"includes":[""],
 "excludes":[{"service":"","why":"","ownPage":true}],
-"ambiguities":[{"reading":"","whyNotOurs":""}]}`;}
+"ambiguities":[{"reading":"","whyNotOurs":""}],
+"changes":[{"what":"","from":"","to":"","causedByNote":"","why":""}],
+"pushback":[{"note":"","concern":"","applied":true,"reasoning":""}]}`;}
 
 function qScopeB(c,a){return `Keyword scope filters for a service page.
 
 SERVICE: "${c.svc}"${c.root2?` (also "${c.root2}")`:''} in ${c.city}, ${c.state}
 THIS PAGE IS ABOUT: ${a?.productDefinition||c.svc}
 OFF THIS PAGE: ${(a?.excludes||[]).map(e=>e.service).join(', ')||'none listed'}
-${S.scopeNotes?`
-OPERATOR INSTRUCTIONS, these override your own judgement. Apply them exactly:
-${S.scopeNotes}`:''}
+${(S.scope&&S.scopeNotes)?`
+YOU ARE REVISING EXISTING FILTERS, NOT WRITING NEW ONES.
+
+PREVIOUS FILTERS:
+requiredTerms: ${(S.scope.requiredTerms||[]).join(', ')}
+bannedTerms: ${(S.scope.bannedTerms||[]).join(', ')}
+
+THE OPERATOR'S NOTES:
+${S.scopeNotes}
+
+Change ONLY what the notes require. Every other term comes back identical. Record each change in
+"changes" naming the note that caused it. If a note would break the filters, say so in "pushback"
+with your reasoning, and state whether you applied it. Never silently ignore a note.
+Remember: a banned term also removes legitimate combination keywords. If a note asks to keep a
+combination term, the matching word must come OUT of bannedTerms, and you should say so.
+`:''}
 
 Produce two filter lists and one sentence. Nothing else.
 - requiredTerms: the product noun and its common variants. Every keyword must contain one of these.
@@ -542,7 +577,9 @@ Produce two filter lists and one sentence. Nothing else.
 - fragmentWarning: one sentence saying a keyword must be a phrase a person would type, never a bare
   part name or a two-word symptom label.
 ${RULES_BASE}
-JSON: {"requiredTerms":[""],"bannedTerms":[""],"fragmentWarning":""}`;}
+JSON: {"requiredTerms":[""],"bannedTerms":[""],"fragmentWarning":"",
+"changes":[{"what":"","from":"","to":"","causedByNote":"","why":""}],
+"pushback":[{"note":"","concern":"","applied":true,"reasoning":""}]}`;}
 
 const SCOPE=c=>{
   const s=S.scope; if(!s)return '';
@@ -583,6 +620,10 @@ async function doScope(){
   const B=await gemini(qScopeB(c,A),'scope B');
   say('Re-analyse the service'); btn.disabled=false;
 
+  S.changes=[].concat(A.changes||[],(B&&B.changes)||[]);
+  S.pushback=[].concat(A.pushback||[],(B&&B.pushback)||[]);
+  S.lastNotes=S.scopeNotes||'';
+
   const noun=c.svc.replace(/\s*(repair|service|fix|cleaning)\s*$/i,'').trim();
   const noun2=c.root2?c.root2.replace(/\s*(repair|service|fix|cleaning)\s*$/i,'').trim():'';
   S.scope={
@@ -600,6 +641,7 @@ async function doScope(){
 }
 
 function defaultScope(){
+  S.changes=[];S.pushback=[];
   const c=ctx();
   const noun=c.svc.replace(/\s*(repair|service|fix)\s*$/i,'').trim();
   S.scope={productDefinition:c.svc,customerCalls:[noun],includes:[c.svc],excludes:[],
@@ -611,7 +653,25 @@ function defaultScope(){
 function renderScope(){
   const s=S.scope;
   const list=a=>(a||[]).map(x=>`<li>${esc(typeof x==='string'?x:(x.service||x.reading))}${x&&x.why?' — '+esc(x.why):''}${x&&x.whyNotOurs?' — '+esc(x.whyNotOurs):''}</li>`).join('');
-  el('scopeOut').innerHTML=`
+  let audit='';
+  if(S.lastNotes){
+    audit+=`<div class="note"><b>Your notes on the last pass:</b><br><span class="mono">${esc(S.lastNotes)}</span></div>`;
+    audit+=`<h3 style="margin-top:18px">What changed, and why</h3>`;
+    audit+=(S.changes&&S.changes.length)
+      ? table(S.changes,[['Changed','what'],['From','from'],['To','to'],['Which note','causedByNote'],['Why','why']],0)
+      : `<div class="note bad">Nothing was reported as changed. If the scope still moved, the model
+         revised without recording it. Press <b>Re-analyse with my notes</b> again, or edit the two
+         filter boxes by hand, which always wins.</div>`;
+    if(S.pushback&&S.pushback.length){
+      audit+=`<h3>Where it disagrees with you</h3>
+        <p class="sdesc">You asked to be argued with. These are the notes it thinks are wrong, and
+        whether it applied them anyway.</p>`
+        +table(S.pushback,[['Your note','note'],['Its concern','concern'],['Applied?','applied'],['Reasoning','reasoning']],0);
+    }
+    audit+=`<hr style="border:0;border-top:1px solid var(--line);margin:22px 0">`;
+  }
+
+  el('scopeOut').innerHTML=audit+`
     <div class="note"><b>This page is about:</b> ${esc(s.productDefinition)}</div>
     <div class="row r2">
       <div><h3 style="margin-top:6px">In scope</h3><ul>${list(s.includes)||'<li>none given</li>'}</ul></div>
@@ -619,7 +679,7 @@ function renderScope(){
     </div>
     ${(s.ambiguities||[]).length?`<h3>Not what we mean</h3><ul>${list(s.ambiguities)}</ul>`:''}
     <div class="row">
-      <div><label for="scopeNotes">Tell the model what to change <span class="op">optional, plain English</span></label>
+      <div><label for="scopeNotes">Tell the model what to change <span class="op">it revises rather than rewrites, and reports every change</span></label>
         <textarea id="scopeNotes" style="min-height:64px" placeholder="e.g. keep stackable washer dryer terms, they belong here. Drop vent cleaning, it gets its own page. Add Speed Queen, it is everywhere in student rentals."></textarea></div>
     </div>
     <div style="display:flex;gap:8px;margin-bottom:14px">
@@ -640,8 +700,11 @@ function renderScope(){
       this page, take that word out of the banned box and rely on the excludes list instead.</div>
     <button class="btn solid" id="confirmScope">Confirm scope and unlock the run</button>`;
   el('scopeOut').classList.remove('hide');
-  if(S.scopeNotes)el('scopeNotes').value=S.scopeNotes;
-  el('redoScope').onclick=()=>{S.scopeNotes=el('scopeNotes').value.trim();doScope();};
+
+  el('redoScope').onclick=()=>{
+    const n=el('scopeNotes').value.trim();
+    if(!n){alert('Write a note first.\n\nRe-analysing with an empty box would just regenerate the scope for no reason, which is exactly the drift you noticed.');return;}
+    S.scopeNotes=n;doScope();};
   el('confirmScope').onclick=()=>{
     const split=v=>v.split(',').map(x=>x.trim()).filter(Boolean);
     S.scope.requiredTerms=split(el('reqT').value);
