@@ -86,7 +86,6 @@ ul{margin:4px 0 16px;padding-left:20px}li{margin-bottom:5px}
 .bar select{width:auto}
 footer{border-top:1px solid var(--line);margin-top:50px;padding:24px 0 60px;color:var(--dim);font-size:13.5px}
 :focus-visible{outline:2px solid var(--signal);outline-offset:2px}
-.conn{border:1px solid var(--line);background:var(--panel2);padding:14px 16px;margin:4px 0 14px}
 .hide{display:none}
 </style>
 </head>
@@ -103,7 +102,7 @@ footer{border-top:1px solid var(--line);margin-top:50px;padding:24px 0 60px;colo
 
 <section class="step">
   <div class="shead"><span class="snum">01</span><div><h2>The page you are building</h2>
-    <span class="sdesc">Three required fields. Everything else has a sensible default.</span></div></div>
+    <span class="sdesc">Three required fields. The API key comes from your environment variable, nothing to set up here.</span></div></div>
   <div class="sbody">
     <div class="row r3">
       <div><label for="svc">Service</label><input id="svc" placeholder="oven repair"></div>
@@ -117,48 +116,7 @@ footer{border-top:1px solid var(--line);margin-top:50px;padding:24px 0 60px;colo
         <input id="root2" placeholder="clothes dryer repair"></div>
     </div>
 
-    <div class="conn">
-      <h3 style="margin-top:6px">Connection</h3>
-      <div class="row r2">
-        <div><label for="prov">Who answers</label>
-          <select id="prov">
-            <option value="auto">Detect automatically — recommended</option>
-            <option value="claude">Claude, inside this chat — no key needed</option>
-            <option value="server">My Vercel server key — Groq, Gemini or any OpenAI-compatible</option>
-            <option value="own">Gemini with a key I paste below</option>
-          </select></div>
-        <div style="align-self:end"><button class="btn" id="test" style="width:100%">Test connection</button></div>
-      </div>
-      <div class="row r2" id="srvRow" style="display:none">
-        <div><label for="srvProv">Which server key to use</label>
-          <select id="srvProv">
-            <option value="">Whatever is set on the server</option>
-            <option value="groq">Groq</option>
-            <option value="gemini">Gemini</option>
-            <option value="openai">OpenAI-compatible (Cerebras, OpenRouter, Mistral)</option>
-          </select></div>
-        <div><label for="srvModel">Model name</label>
-          <input id="srvModel" placeholder="llama-3.3-70b-versatile"></div>
-      </div>
-      <div class="row" id="keyRow" style="display:none">
-        <div><label for="key">Gemini API key</label>
-          <input id="key" type="password" placeholder="AIza..."></div>
-      </div>
-      <div id="srv" class="note">Checking the connection...</div>
-    </div>
-
-    <details>
-      <summary>Model settings</summary>
-      <div class="row r3" style="margin-top:12px">
-        <div><label for="model">Model</label>
-          <input id="model" value="gemini-2.5-flash" placeholder="gemini-2.5-flash"></div>
-        <div><label for="delay">Pause between calls (ms)</label><input id="delay" type="number" value="4500"></div>
-        <div><label for="maxtok">Max output tokens per call</label><input id="maxtok" type="number" value="16000"></div>
-      </div>
-      <div class="note"><b>Free tier.</b> Flash allows more requests per minute than Pro, so it is the
-        default. On a free key keep the pause at 4500ms or higher. If calls fail with 429, raise it.
-        Model names change, so if you get a model error, paste the current name.</div>
-    </details>
+    <div id="srv" class="note bad hide"></div>
   </div>
 </section>
 
@@ -277,35 +235,26 @@ function metrics(){el('mKw').textContent=S.kw;el('mCall').textContent=S.calls;el
   el('mTime').textContent=S.t0?Math.round((Date.now()-S.t0)/1000)+'s':'0s';}
 setInterval(()=>{if(S.t0)metrics();},1000);
 
-['model','city','state','delay','maxtok','srvModel'].forEach(k=>{const v=localStorage.getItem('pt_'+k);
+['city','state'].forEach(k=>{const v=localStorage.getItem('pt_'+k);
   if(v)el(k).value=v;el(k).addEventListener('change',()=>localStorage.setItem('pt_'+k,el(k).value));});
 
-/* ---- providers: resolve a working transport, do not interrogate the user ---- */
-S.mode='auto';
-function showSrv(cls, html){ el('srv').className='note'+(cls?' '+cls:''); el('srv').innerHTML=html; }
+/* ---- connection: detected once, silently. No UI unless it fails. ---- */
+S.mode=null; S.delay=2200;
 
-const MODEL_DEFAULTS={groq:'llama-3.3-70b-versatile',gemini:'gemini-3.5-flash-lite',openai:''};
-
-function syncProv(){
-  const p=el('prov').value;
-  el('keyRow').style.display=(p==='own')?'':'none';
-  el('srvRow').style.display=(p==='server')?'':'none';
+function connErr(html){
+  const n=el('srv');
+  if(!html){ n.classList.add('hide'); n.innerHTML=''; return; }
+  n.classList.remove('hide'); n.innerHTML=html;
 }
-el('prov').addEventListener('change',()=>{syncProv();probe(true);});
-el('srvProv').addEventListener('change',()=>{
-  const v=el('srvProv').value;
-  if(v&&MODEL_DEFAULTS[v]!==undefined&&!el('srvModel').value.trim())el('srvModel').value=MODEL_DEFAULTS[v];
-  probe(true);
-});
 
-/* ask the serverless function what it has. returns null if it is not there. */
+/* ask our own function what it has. */
 async function serverInfo(){
   try{
     const r=await fetch('/api/generate',{method:'GET',headers:{'Accept':'application/json'}});
     const raw=await r.text();
     let d=null; try{ d=JSON.parse(raw); }catch(e){}
     if(d&&d.ok)return d;
-    return {notFunction:true,status:r.status,head:raw.slice(0,80).replace(/\s+/g,' ')};
+    return {notFunction:true,status:r.status};
   }catch(e){ return {unreachable:true,message:e.message}; }
 }
 
@@ -321,98 +270,35 @@ async function claudeWorks(){
   }catch(e){ return false; }
 }
 
-function useServer(info,loud){
-  const have=Object.keys(info.keys||{}).filter(k=>info.keys[k]);
-  let want=el('srvProv').value;
-  if(!want||!have.includes(want)){ want=have[0]||''; el('srvProv').value=want; }
-  if(want&&!el('srvModel').value.trim()&&MODEL_DEFAULTS[want]!==undefined)
-    el('srvModel').value=MODEL_DEFAULTS[want];
-  el('delay').value=(want==='groq')?2200:4500;
-  S.mode='server';
-  const warn=(want==='gemini'&&/flash$/i.test(el('srvModel').value.trim()))
-    ? '<br><br><b>Careful.</b> Gemini Flash allows only about 20 requests a day on the free tier and one run makes roughly 35. Change the model to <span class="mono">gemini-3.5-flash-lite</span>.'
-    : '';
-  showSrv('','<b>Ready.</b> Using your server key: <b>'+esc(want||'unknown')+'</b>'
-    +(el('srvModel').value.trim()?' with <span class="mono">'+esc(el('srvModel').value.trim())+'</span>':'')
-    +'. Nothing else to set up.'+warn);
-  if(loud)log('Connection: server key ('+want+'). Ready to run.','ok');
-  return 'server';
-}
+/* resolves once, then caches. force=true re-checks. */
+async function connect(force){
+  if(S.mode&&!force)return S.mode;
 
-async function probe(loud){
-  const choice=el('prov').value;
-
-  /* explicit: user pasted a key */
-  if(choice==='own'){
-    if(el('key').value.trim()){
-      S.mode='own';
-      showSrv('','<b>Ready.</b> Using the key you pasted, sent straight from this browser to Google.');
-      if(loud)log('Connection: your own Gemini key.','ok');
-      return 'own';
-    }
-    S.mode='none';
-    showSrv('bad','<b>No key entered.</b> Paste a Gemini API key in the box above.');
-    return 'none';
-  }
-
-  /* explicit: Claude */
-  if(choice==='claude'){
-    if(await claudeWorks()){
-      S.mode='claude'; el('delay').value=400;
-      showSrv('','<b>Ready.</b> Answering with Claude, no key needed. This works inside the Claude preview only.');
-      if(loud)log('Connection: Claude in this chat.','ok');
-      return 'claude';
-    }
-    S.mode='none';
-    showSrv('bad','<b>Claude is not reachable here.</b> That is expected on Vercel or a local file. '
-      +'Switch <b>Who answers</b> back to <b>Detect automatically</b> and it will use your server key.');
-    return 'none';
-  }
-
-  /* explicit: server */
-  if(choice==='server'){
-    const info=await serverInfo();
-    if(info&&info.ok&&info.hasKey)return useServer(info,loud);
-    S.mode='none';
-    showSrv('bad', info&&info.ok
-      ? '<b>The function is running but no key is set.</b> Add <span class="mono">GROQ_API_KEY</span> in Vercel, Settings, Environment Variables, then <b>redeploy</b>.'
-      : '<b>The serverless function is not running.</b> Check that <span class="mono">api/generate.js</span> sits inside a folder called <span class="mono">api</span> in the repo, then redeploy.');
-    return 'none';
-  }
-
-  /* AUTO: server first, Claude second, then give up with a clear reason */
-  showSrv('','Checking your connection...');
   const info=await serverInfo();
-  if(info&&info.ok&&info.hasKey){ el('prov').value='server'; syncProv(); return useServer(info,loud); }
+  if(info&&info.ok&&info.hasKey){
+    const have=Object.keys(info.keys||{}).filter(k=>info.keys[k]);
+    S.mode='server'; S.provider=have[0]||''; S.delay=(S.provider==='groq')?2200:4500;
+    connErr('');
+    log('Connected using your server key ('+S.provider+').','ok');
+    return 'server';
+  }
 
   if(await claudeWorks()){
-    el('prov').value='claude'; S.mode='claude'; el('delay').value=400; syncProv();
-    showSrv('','<b>Ready.</b> Answering with Claude, no key needed. Once this is on Vercel with a key, it will use that instead automatically.');
-    if(loud)log('Connection: Claude in this chat.','ok');
+    S.mode='claude'; S.delay=400; connErr('');
+    log('Connected using Claude in this preview.','ok');
     return 'claude';
   }
 
-  S.mode='none';
-  el('prov').value='own'; syncProv();
-  showSrv('bad', (info&&info.ok&&!info.hasKey)
-    ? '<b>Your function is running but no API key is set.</b> In Vercel go to Settings, Environment '
-      +'Variables, add <span class="mono">GROQ_API_KEY</span>, then <b>redeploy</b>. Vercel does not '
-      +'apply a new variable to an existing build.'
-    : '<b>No connection found.</b> The serverless function did not respond, so either '
-      +'<span class="mono">api/generate.js</span> is missing from the <span class="mono">api</span> folder '
-      +'in your repo, or you are opening this file locally. You can paste a Gemini key below to run it anyway.');
-  if(loud)log('Connection: none.','er');
-  return 'none';
+  S.mode=null;
+  connErr(info&&info.ok&&!info.hasKey
+    ? '<b>No API key on the server.</b> In Vercel open Settings, Environment Variables, add '
+      +'<span class="mono">GROQ_API_KEY</span>, then <b>redeploy</b>. Vercel does not apply a new '
+      +'variable to a build that already exists.'
+    : '<b>The API route is not responding.</b> Check that <span class="mono">api/generate.js</span> '
+      +'sits inside a folder called <span class="mono">api</span> in the repo, then redeploy.');
+  return null;
 }
-
-syncProv(); probe();
-el('key').addEventListener('input',()=>{clearTimeout(S._kt);S._kt=setTimeout(()=>probe(),400);});
-el('test').onclick=async(e)=>{
-  e.target.textContent='Testing...';e.target.disabled=true;
-  const m=await probe(true);
-  e.target.textContent='Test connection';e.target.disabled=false;
-  if(m==='none')el('srv').scrollIntoView({behavior:'smooth',block:'center'});
-};
+connect();
 
 /* ---- evidence pages ---- */
 function addPage(name="",text=""){
@@ -520,11 +406,10 @@ function parseLoose(txt){
 /* ---- gemini with retry ---- */
 const TRUNC_HINT='\n\nIMPORTANT: your previous reply was cut off before the JSON closed. Return at most HALF as many items this time, and keep every string under 12 words. Completing the JSON matters more than covering everything.';
 async function gemini(prompt,label){
-  let prov=S.mode;
-  if(prov==='auto'||!prov){ prov=await probe(); }
+  const prov=S.mode||await connect();
+  if(!prov){S.fatal='No API connection.';return null;}
   let p=prompt, wasTrunc=false;
-  const model=el('model').value.trim()||'gemini-2.5-flash';
-  const maxTokens=parseInt(el('maxtok').value,10)||16000;
+  const maxTokens=16000;
   const attempts=4;
   for(let i=1;i<=attempts;i++){
     if(S.stop)throw new Error('Stopped.');
@@ -539,23 +424,13 @@ async function gemini(prompt,label){
         const d=await r.json();
         text=(d.content||[]).map(x=>x.type==='text'?(x.text||''):'').join('');
         finish=d.stop_reason==='max_tokens'?'MAX_TOKENS':'STOP';
-      }else if(prov==='own'){
-        const ownKey=el('key').value.trim();
-        const url=`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(ownKey)}`;
-        const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({contents:[{role:'user',parts:[{text:p}]}],
-            generationConfig:{temperature:0.4,maxOutputTokens:maxTokens,responseMimeType:'application/json'}})});
-        const d=await r.json();
-        if(!r.ok)throw Object.assign(new Error(d?.error?.message||('HTTP '+r.status)),{status:r.status});
-        const c=d?.candidates?.[0];finish=c?.finishReason;
-        text=(c?.content?.parts||[]).map(p=>p.text||'').join('');
-      }else{
+            }else{
         const r=await fetch('/api/generate',{method:'POST',
           headers:{'Content-Type':'application/json','Accept':'application/json'},
-          body:JSON.stringify({prompt:p,model:(el('srvModel').value.trim()||undefined),provider:(el('srvProv').value||undefined),maxTokens})});
+          body:JSON.stringify({prompt:p,maxTokens})});
         const raw=await r.text();
         let d=null;try{d=JSON.parse(raw);}catch(e){
-          throw Object.assign(new Error('The /api/generate endpoint returned a web page instead of JSON, so the serverless function is not running. Switch "Who answers" to Claude, or paste your own Gemini key.'),{status:0,fatal:true});}
+          throw Object.assign(new Error('The /api/generate route returned a web page instead of JSON, so the serverless function is not running.'),{status:0,fatal:true});}
         if(!r.ok)throw Object.assign(new Error(d.error||('HTTP '+r.status)),{status:r.status});
         text=d.text;finish=d.finishReason;
       }
@@ -683,8 +558,8 @@ Examples of what is NOT a keyword and must never be output: "no heat", "thermost
 async function doScope(){
   const c=ctx();
   if(!c.svc||!c.city)return alert('Add the service and the city first.');
-  const mode=await probe();
-  if(mode==='none'){alert('No connection. Set "Who answers" at the top of the page first.');return;}
+  if(!await connect()){alert('No API connection.\n\nCheck the message at the top of the page.');
+    el('srv').scrollIntoView({behavior:'smooth',block:'center'});return;}
   const btn=el('analyse'); btn.disabled=true;
   const say=t=>{btn.textContent=t;};
   S.t0=S.t0||Date.now();
@@ -1090,20 +965,17 @@ async function doRun(){
     alert('Confirm the scope first.\n\nStep 02 defines what this service is and what must stay off the page. It is the filter that stops another appliance\'s keywords leaking in.');
     el('scopeOut').scrollIntoView({behavior:'smooth',block:'center'});return;
   }
-  const mode=await probe();
-  if(mode==='none'){
-    el('phase').textContent='Cannot run: no connection.';
+  if(!await connect(true)){
+    el('phase').textContent='Cannot run: no API connection.';
     el('log').innerHTML='';
-    log('Nothing ran. No working connection was found.','er');
-    log('If this is on Vercel: add GROQ_API_KEY under Settings, Environment Variables, then REDEPLOY.','er');
-    log('Vercel does not apply a new variable to a build that already exists.','er');
-    log('If this is the Claude preview: set "Who answers" to Claude.','er');
+    log('Nothing ran. No API connection.','er');
+    log('On Vercel: add GROQ_API_KEY under Settings, Environment Variables, then REDEPLOY.','er');
     el('srv').scrollIntoView({behavior:'smooth',block:'center'});return;
   }
   S.stop=false;S.fatal=null;S.calls=0;S.fails=0;S.kw=0;S.stages={};S.violations=[];S.filtered=[];S.t0=Date.now();
   el('stop').disabled=false;el('log').innerHTML='';
   el('results').classList.remove('show');metrics();
-  const pause=()=>sleep(parseInt(el('delay').value,10)||400);
+  const pause=()=>sleep(S.delay||2200);
 
   const tasks=[
     ['Patterns',                 ()=>qPatterns(c),                      r=>S.stages.s1=r||{}],
