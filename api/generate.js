@@ -139,9 +139,14 @@ module.exports = async function handler(req, res) {
     }
 
     // Providers count prompt + max_tokens against the tokens-per-minute budget, so asking for a
-    // huge completion burns the budget even when the reply is short. These prompts never need more
-    // than about 1200 tokens of output.
-    const cap = Math.min(maxTokens, 1500);
+    // huge completion burns the budget even when the reply is short. But reasoning models spend
+    // tokens thinking before they emit anything, so the cap cannot be too tight either or the JSON
+    // never arrives and the reply comes back empty. The page sends a per-task figure.
+    const cap = Math.min(maxTokens, 3000);
+
+    // gpt-oss and qwen think before answering. Turn that down: this is structured extraction, not
+    // a reasoning problem, and every thinking token is a token that cannot hold the answer.
+    const isReasoner = /gpt-oss|qwen|deepseek|thinking/i.test(model);
 
     async function ask(useJsonMode) {
       const payload = {
@@ -151,6 +156,7 @@ module.exports = async function handler(req, res) {
         messages: [{ role: 'user', content: prompt }]
       };
       if (useJsonMode) payload.response_format = { type: 'json_object' };
+      if (isReasoner) payload.reasoning_effort = 'low';
       const rr = await fetch(base + '/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
@@ -207,8 +213,15 @@ module.exports = async function handler(req, res) {
     }
 
     const choice = data && data.choices && data.choices[0];
+    const content = (choice && choice.message && choice.message.content) || '';
+    if (!content && choice && choice.finish_reason === 'length') {
+      return res.status(502).json({
+        error: 'The model used its whole token budget thinking and produced no answer. Raise max tokens or use a non-reasoning model.',
+        provider: provider, model: model, usage: data.usage || null
+      });
+    }
     return res.status(200).json({
-      text: (choice && choice.message && choice.message.content) || '',
+      text: content,
       finishReason: (choice && choice.finish_reason) === 'length' ? 'MAX_TOKENS' : 'STOP',
       provider: provider,
       model: model,
