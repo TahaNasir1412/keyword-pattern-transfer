@@ -404,28 +404,51 @@ function parseLoose(txt){
 }
 
 /* ---- gemini with retry ---- */
-/* Groq free tier is 8000 tokens per minute. Track a rolling window and wait before we breach it
-   rather than firing blind and eating a 429. */
-S.tpmLimit=8000; S.tokenLog=[];
+/* Free tiers meter tokens per minute. Reserve based on what calls ACTUALLY cost, measured from the
+   provider's own usage numbers, rather than the worst case. Worst case is prompt + max_tokens, which
+   is roughly double reality and makes the tool sit still for no reason. */
+S.tpmLimit=8000; S.tokenLog=[]; S.usageSamples=[];
 function tokensInWindow(){
   const cut=Date.now()-60000;
   S.tokenLog=S.tokenLog.filter(t=>t.at>cut);
   return S.tokenLog.reduce((n,t)=>n+t.n,0);
 }
 function noteTokens(n){ if(n>0)S.tokenLog.push({at:Date.now(),n:n}); }
-async function waitForBudget(need,label){
-  if(S.mode!=='server')return;
+function noteUsage(n){ if(n>0){S.usageSamples.push(n); if(S.usageSamples.length>8)S.usageSamples.shift();} }
+function reserveFor(prompt,want){
+  if(S.usageSamples.length>=2){
+    const avg=S.usageSamples.reduce((a,b)=>a+b,0)/S.usageSamples.length;
+    return Math.ceil(avg*1.2);              // measured, with headroom
+  }
+  return Math.ceil(String(prompt||'').length/3.6)+Math.min(want||1600,1200);
+}
+/* Wait only until ENOUGH tokens expire, not until the oldest entry does. */
+function waitNeeded(need){
+  const ceiling=S.tpmLimit*0.95;
   let used=tokensInWindow();
-  while(used+need>S.tpmLimit*0.92){
-    const oldest=S.tokenLog[0];
-    const wait=oldest?Math.max(1000,(oldest.at+60000)-Date.now()+400):3000;
-    log(`    waiting ${Math.ceil(wait/1000)}s for token budget (${used}/${S.tpmLimit} used this minute)`,'wa');
-    await sleep(Math.min(wait,62000));
+  if(used+need<=ceiling)return 0;
+  let freed=0;
+  for(const t of S.tokenLog){
+    freed+=t.n;
+    if(used-freed+need<=ceiling)return Math.max(500,(t.at+60000)-Date.now()+300);
+  }
+  return 60000;
+}
+async function waitForBudget(prompt,want,label){
+  if(S.mode!=='server')return;
+  const need=reserveFor(prompt,want);
+  let ms=waitNeeded(need);
+  if(ms<=0)return;
+  const until=Date.now()+ms;
+  log(`    pausing ${Math.ceil(ms/1000)}s for token budget (${tokensInWindow()}/${S.tpmLimit} this minute)`,'wa');
+  while(Date.now()<until){
     if(S.stop)return;
-    used=tokensInWindow();
+    const left=Math.ceil((until-Date.now())/1000);
+    el('phase').textContent=`${label} — waiting ${left}s for the token budget to clear`;
+    await sleep(500);
+    if(waitNeeded(need)<=0)break;      // budget freed early
   }
 }
-const estTokens=(s,want)=>Math.ceil(String(s||'').length/3.6)+(want||1600);
 
 const TRUNC_HINT='\n\nIMPORTANT: your previous reply was cut off before the JSON closed. Return at most HALF as many items this time, and keep every string under 12 words. Completing the JSON matters more than covering everything.';
 async function gemini(prompt,label,want){
@@ -436,7 +459,7 @@ async function gemini(prompt,label,want){
   const attempts=6;
   for(let i=1;i<=attempts;i++){
     if(S.stop)throw new Error('Stopped.');
-    await waitForBudget(estTokens(p,maxTokens),label);
+    await waitForBudget(p,maxTokens,label);
     if(S.stop)throw new Error('Stopped.');
     try{
       let text,finish;
@@ -463,7 +486,9 @@ async function gemini(prompt,label,want){
           throw Object.assign(new Error(bits.join(' — ')),{status:r.status,retryAfter:d.retryAfter});
         }
         text=d.text;finish=d.finishReason;
-        noteTokens((d.usage&&(d.usage.total_tokens||d.usage.prompt_tokens))||estTokens(p,maxTokens));
+        const realUse=(d.usage&&(d.usage.total_tokens||d.usage.prompt_tokens))||0;
+        noteTokens(realUse||reserveFor(p,maxTokens));
+        noteUsage(realUse);
       }
       if(finish&&finish!=='STOP'){
         log(`    ${label}: reply was cut short (${finish}).`,'wa');
@@ -494,7 +519,7 @@ async function gemini(prompt,label,want){
       else if(st===429){
         const ra=err.retryAfter||(/try again in ([\d.]+)\s*s/i.exec(err.message)||[])[1];
         wait=ra?Math.ceil(Number(ra)*1000)+900:8000;
-        noteTokens(estTokens(p,maxTokens));   // the attempt still spent budget
+        noteTokens(reserveFor(p,maxTokens));   // the attempt still spent budget
       } else wait=Math.min(30000,1500*Math.pow(2,i));
       log(`    ${label} attempt ${i} failed (${err.message.slice(0,80)}). Retrying in ${wait/1000}s.`,'wa');
       await sleep(wait);
@@ -1110,7 +1135,7 @@ async function doRun(){
     log('On Vercel: add GROQ_API_KEY under Settings, Environment Variables, then REDEPLOY.','er');
     el('srv').scrollIntoView({behavior:'smooth',block:'center'});return;
   }
-  S.stop=false;S.fatal=null;S.calls=0;S.fails=0;S.kw=0;S.stages={};S.violations=[];S.filtered=[];S.lostStages=[];S.tokenLog=[];S.t0=Date.now();
+  S.stop=false;S.fatal=null;S.calls=0;S.fails=0;S.kw=0;S.stages={};S.violations=[];S.filtered=[];S.lostStages=[];S.tokenLog=[];S.usageSamples=[];S.t0=Date.now();
   el('stop').disabled=false;el('log').innerHTML='';
   el('results').classList.remove('show');metrics();
   const pause=()=>sleep(S.delay||2200);
