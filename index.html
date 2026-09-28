@@ -277,7 +277,7 @@ async function connect(force){
   const info=await serverInfo();
   if(info&&info.ok&&info.hasKey){
     const have=Object.keys(info.keys||{}).filter(k=>info.keys[k]);
-    S.mode='server'; S.provider=have[0]||''; S.delay=(S.provider==='groq')?2200:4500;
+    S.mode='server'; S.provider=have[0]||''; S.delay=(S.provider==='groq')?1200:4500;
     connErr('');
     log('Connected using your server key ('+S.provider+').','ok');
     return 'server';
@@ -404,14 +404,39 @@ function parseLoose(txt){
 }
 
 /* ---- gemini with retry ---- */
+/* Groq free tier is 8000 tokens per minute. Track a rolling window and wait before we breach it
+   rather than firing blind and eating a 429. */
+S.tpmLimit=8000; S.tokenLog=[];
+function tokensInWindow(){
+  const cut=Date.now()-60000;
+  S.tokenLog=S.tokenLog.filter(t=>t.at>cut);
+  return S.tokenLog.reduce((n,t)=>n+t.n,0);
+}
+function noteTokens(n){ if(n>0)S.tokenLog.push({at:Date.now(),n:n}); }
+async function waitForBudget(need,label){
+  if(S.mode!=='server')return;
+  let used=tokensInWindow();
+  while(used+need>S.tpmLimit*0.92){
+    const oldest=S.tokenLog[0];
+    const wait=oldest?Math.max(1000,(oldest.at+60000)-Date.now()+400):3000;
+    log(`    waiting ${Math.ceil(wait/1000)}s for token budget (${used}/${S.tpmLimit} used this minute)`,'wa');
+    await sleep(Math.min(wait,62000));
+    if(S.stop)return;
+    used=tokensInWindow();
+  }
+}
+const estTokens=s=>Math.ceil(String(s||'').length/3.6)+1500;
+
 const TRUNC_HINT='\n\nIMPORTANT: your previous reply was cut off before the JSON closed. Return at most HALF as many items this time, and keep every string under 12 words. Completing the JSON matters more than covering everything.';
 async function gemini(prompt,label){
   const prov=S.mode||await connect();
   if(!prov){S.fatal='No API connection.';return null;}
   let p=prompt, wasTrunc=false;
-  const maxTokens=16000;
-  const attempts=4;
+  const maxTokens=1500;
+  const attempts=6;
   for(let i=1;i<=attempts;i++){
+    if(S.stop)throw new Error('Stopped.');
+    await waitForBudget(estTokens(p),label);
     if(S.stop)throw new Error('Stopped.');
     try{
       let text,finish;
@@ -435,9 +460,10 @@ async function gemini(prompt,label){
           const bits=[d.error||('HTTP '+r.status)];
           if(d.model)bits.push('model: '+d.model);
           if(d.hint)bits.push(d.hint);
-          throw Object.assign(new Error(bits.join(' — ')),{status:r.status});
+          throw Object.assign(new Error(bits.join(' — ')),{status:r.status,retryAfter:d.retryAfter});
         }
         text=d.text;finish=d.finishReason;
+        noteTokens((d.usage&&(d.usage.total_tokens||d.usage.prompt_tokens))||estTokens(p));
       }
       if(finish&&finish!=='STOP'){
         log(`    ${label}: reply was cut short (${finish}).`,'wa');
@@ -463,7 +489,13 @@ async function gemini(prompt,label){
       const retryable=st===429||st===500||st===503||st===529||/parse|repair|Empty|truncated/i.test(err.message);
       S.fails++;metrics();
       if(i===attempts||!retryable||S.stop){S.lastError=err.message;log(`    ${label} failed: ${err.message}`,'er');return null;}
-      const wait=(st===0)?800:Math.min(30000,1500*Math.pow(2,i));
+      let wait;
+      if(st===0)wait=800;
+      else if(st===429){
+        const ra=err.retryAfter||(/try again in ([\d.]+)\s*s/i.exec(err.message)||[])[1];
+        wait=ra?Math.ceil(Number(ra)*1000)+900:8000;
+        noteTokens(estTokens(p));   // the attempt still spent budget
+      } else wait=Math.min(30000,1500*Math.pow(2,i));
       log(`    ${label} attempt ${i} failed (${err.message.slice(0,80)}). Retrying in ${wait/1000}s.`,'wa');
       await sleep(wait);
     }
@@ -798,7 +830,7 @@ The obvious keyword returned: ${c.obvious||'nothing measurable'}.`;
 function qPatterns(c){return `${HEAD(c)}
 
 EVIDENCE, keywords from pages already researched on this same site (volume shown where known):
-${evidenceBlock(120)}
+${evidenceBlock(90)}
 
 Strip the service noun to [SERVICE] and the city to [CITY], keeping word order and spelling exactly.
 Rank patterns by how many DIFFERENT pages each held up on, not by volume:
@@ -825,7 +857,7 @@ JSON: {"icp":[{"segment":"","trigger":"","decisionDriver":"","sectionItNeeds":""
 function qFamilies(c){return `${HEAD(c)}
 
 EVIDENCE:
-${evidenceBlock(90)}
+${evidenceBlock(60)}
 
 A. Count the supplied keywords per family: location, colloquial, urgency, brand, symptom,
 type_variant, cost, decision, question, parts, tenure_segment, proximity, competitor_brand.
@@ -855,7 +887,7 @@ JSON: {"locationKeywords":[{"keyword":"","tier":1,"sourcePattern":""}]}`;}
 function qTransfer(c){return `${HEAD(c)}
 
 EVIDENCE:
-${evidenceBlock(90)}
+${evidenceBlock(60)}
 DROPPED by the operator, never reintroduce: ${c.dropped.join(', ')||'none'}
 
 MAPPING PASS ONLY. Carry across non-location concepts that ALREADY EXIST in the evidence. Every item
@@ -879,9 +911,9 @@ JSON: {"brands":[{"brand":"","status":"makes","keywords":[""],"note":""}]}`;}
 
 function qExpand(c,fam,city,icp,known){return `${HEAD(c)}
 
-CITY CONTEXT: ${JSON.stringify((city||[]).slice(0,5)).slice(0,1400)}
-ICP: ${JSON.stringify((icp||[]).slice(0,4)).slice(0,1100)}
-ALREADY PRODUCED, never repeat: ${known.slice(0,160).join(', ').slice(0,2600)}
+CITY CONTEXT: ${JSON.stringify((city||[]).slice(0,4).map(x=>x.factor+': '+x.effectOnService)).slice(0,700)}
+ICP: ${JSON.stringify((icp||[]).slice(0,4).map(x=>x.segment+': '+x.trigger)).slice(0,600)}
+ALREADY PRODUCED, never repeat: ${known.slice(-70).join(', ').slice(0,1100)}
 
 CONCEPT EXPANSION for one family only: ${fam}
 
@@ -951,7 +983,7 @@ JSON: {"tiers":{"primary":"","secondary":"","tertiary":"","trafficReality":""},
 function qLinks(c){return `${HEAD(c)}
 
 EXISTING PAGES AND THEIR KEYWORDS:
-${evidenceBlock(70)}
+${evidenceBlock(50)}
 
 1. Conflicts: any keyword this new page wants that an existing page already targets. Name both, pick
 an owner, never assign one keyword twice. At most 6.
@@ -1082,7 +1114,7 @@ async function doRun(){
     log('On Vercel: add GROQ_API_KEY under Settings, Environment Variables, then REDEPLOY.','er');
     el('srv').scrollIntoView({behavior:'smooth',block:'center'});return;
   }
-  S.stop=false;S.fatal=null;S.calls=0;S.fails=0;S.kw=0;S.stages={};S.violations=[];S.filtered=[];S.t0=Date.now();
+  S.stop=false;S.fatal=null;S.calls=0;S.fails=0;S.kw=0;S.stages={};S.violations=[];S.filtered=[];S.lostStages=[];S.tokenLog=[];S.t0=Date.now();
   el('stop').disabled=false;el('log').innerHTML='';
   el('results').classList.remove('show');metrics();
   const pause=()=>sleep(S.delay||2200);
@@ -1117,8 +1149,14 @@ async function doRun(){
     el('prog').style.width=Math.round(i/tasks.length*100)+'%';
     log(`${i+1}/${tasks.length} ${label}`,'go');
     const before=S.kw;
-    const r=await gemini(mk(),label);
-    if(r)into(r);else log(`  ${label}: nothing returned, moving on`,'wa');
+    let r=await gemini(mk(),label);
+    if(!r&&!S.stop&&!S.fatal){
+      log(`  ${label}: nothing returned. Waiting a full minute and trying once more.`,'wa');
+      await sleep(62000);
+      r=await gemini(mk(),label);
+    }
+    if(r)into(r);else{S.lostStages=(S.lostStages||[]).concat(label);
+      log(`  ${label}: still nothing, moving on`,'er');}
     countKw();
     if(S.kw>before)log(`  +${S.kw-before} keywords (total ${S.kw})`,'ok');
     if(S.fatal){log('Stopping: '+S.fatal,'er');break;}
@@ -1130,7 +1168,7 @@ async function doRun(){
 
   if(el('doValidate').checked && !S.stop && S.stages.s6.masterList.length){
     const all=S.stages.s6.masterList.map(m=>m.keyword);
-    const size=35, batches=Math.ceil(all.length/size);
+    const size=25, batches=Math.ceil(all.length/size);
     S.violations=[];
     for(let b=0;b<batches;b++){
       if(S.stop)break;
@@ -1163,6 +1201,8 @@ async function doRun(){
   el('prog').style.width='100%';
   el('phase').textContent=S.stop?'Stopped early. Showing what was built.':'Done.';
   log(`Finished. ${cnt.total} keywords: ${cnt.mapped} mapped, ${cnt.expanded} expanded, ${cnt.orphan} orphan.`,'ok');
+  if(S.lostStages&&S.lostStages.length)
+    log(`WARNING: ${S.lostStages.length} stage(s) produced nothing: ${S.lostStages.join(', ')}. The list below is incomplete.`,'er');
   render(c);
 }
 
@@ -1213,6 +1253,10 @@ function renderFlat(){
 }
 function render(c){
   const{s1,s2,s3,s4,s5,s6}=S.stages;let h='';
+  if(S.lostStages&&S.lostStages.length)h+=`<div class="note bad"><b>This run is incomplete.</b>
+    ${S.lostStages.length} stage(s) produced nothing: <b>${esc(S.lostStages.join(', '))}</b>.
+    That is almost always the provider's tokens-per-minute limit. Wait a few minutes and run again,
+    or untick some concept families to make the run smaller.</div>`;
   if(S.scope)h+=`<h2>Scope this run was held to</h2><div class="note"><b>${esc(S.scope.productDefinition||'')}</b><br>
     Every keyword had to contain: ${esc((S.scope.requiredTerms||[]).join(', ')||'no constraint')}<br>
     No keyword could contain: ${esc((S.scope.bannedTerms||[]).join(', ')||'no constraint')}</div>`;
