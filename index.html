@@ -431,7 +431,12 @@ async function gemini(prompt,label){
         const raw=await r.text();
         let d=null;try{d=JSON.parse(raw);}catch(e){
           throw Object.assign(new Error('The /api/generate route returned a web page instead of JSON, so the serverless function is not running.'),{status:0,fatal:true});}
-        if(!r.ok)throw Object.assign(new Error(d.error||('HTTP '+r.status)),{status:r.status});
+        if(!r.ok){
+          const bits=[d.error||('HTTP '+r.status)];
+          if(d.model)bits.push('model: '+d.model);
+          if(d.hint)bits.push(d.hint);
+          throw Object.assign(new Error(bits.join(' — ')),{status:r.status});
+        }
         text=d.text;finish=d.finishReason;
       }
       if(finish&&finish!=='STOP'){
@@ -454,10 +459,10 @@ async function gemini(prompt,label){
       return out;
     }catch(err){
       const st=err.status||0;
-      if(err.fatal){log('    '+label+' failed: '+err.message,'er');S.fatal=err.message;return null;}
+      if(err.fatal){S.lastError=err.message;log('    '+label+' failed: '+err.message,'er');S.fatal=err.message;return null;}
       const retryable=st===429||st===500||st===503||st===529||/parse|repair|Empty|truncated/i.test(err.message);
       S.fails++;metrics();
-      if(i===attempts||!retryable||S.stop){log(`    ${label} failed: ${err.message}`,'er');return null;}
+      if(i===attempts||!retryable||S.stop){S.lastError=err.message;log(`    ${label} failed: ${err.message}`,'er');return null;}
       const wait=(st===0)?800:Math.min(30000,1500*Math.pow(2,i));
       log(`    ${label} attempt ${i} failed (${err.message.slice(0,80)}). Retrying in ${wait/1000}s.`,'wa');
       await sleep(wait);
@@ -568,9 +573,10 @@ async function doScope(){
   const A=await gemini(qScopeA(c),'scope A');
   if(!A){ say('Analyse the service'); btn.disabled=false;
     el('scopeOut').classList.remove('hide');
-    el('scopeOut').innerHTML='<div class="note bad"><b>The scope call did not come back.</b> '
-      +'Check the log in step 05 for the reason. Press <b>Analyse the service</b> to try again, or '
-      +'<b>Skip and use defaults</b> and fill the two filter boxes in yourself.</div>';
+    el('scopeOut').innerHTML='<div class="note bad"><b>The scope call failed.</b><br><br>'
+      +'<span class="mono">'+esc(S.lastError||'no reason reported')+'</span><br><br>'
+      +'Press <b>Analyse the service</b> to try again, or <b>Skip and use defaults</b> and fill the '
+      +'two filter boxes in yourself, which works just as well.</div>';
     return; }
 
   say('Step 2 of 2: the filters...');
