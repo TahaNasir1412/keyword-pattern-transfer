@@ -425,18 +425,18 @@ async function waitForBudget(need,label){
     used=tokensInWindow();
   }
 }
-const estTokens=s=>Math.ceil(String(s||'').length/3.6)+1500;
+const estTokens=(s,want)=>Math.ceil(String(s||'').length/3.6)+(want||1600);
 
 const TRUNC_HINT='\n\nIMPORTANT: your previous reply was cut off before the JSON closed. Return at most HALF as many items this time, and keep every string under 12 words. Completing the JSON matters more than covering everything.';
-async function gemini(prompt,label){
+async function gemini(prompt,label,want){
   const prov=S.mode||await connect();
   if(!prov){S.fatal='No API connection.';return null;}
   let p=prompt, wasTrunc=false;
-  const maxTokens=1500;
+  const maxTokens=want||1600;
   const attempts=6;
   for(let i=1;i<=attempts;i++){
     if(S.stop)throw new Error('Stopped.');
-    await waitForBudget(estTokens(p),label);
+    await waitForBudget(estTokens(p,maxTokens),label);
     if(S.stop)throw new Error('Stopped.');
     try{
       let text,finish;
@@ -463,7 +463,7 @@ async function gemini(prompt,label){
           throw Object.assign(new Error(bits.join(' — ')),{status:r.status,retryAfter:d.retryAfter});
         }
         text=d.text;finish=d.finishReason;
-        noteTokens((d.usage&&(d.usage.total_tokens||d.usage.prompt_tokens))||estTokens(p));
+        noteTokens((d.usage&&(d.usage.total_tokens||d.usage.prompt_tokens))||estTokens(p,maxTokens));
       }
       if(finish&&finish!=='STOP'){
         log(`    ${label}: reply was cut short (${finish}).`,'wa');
@@ -477,7 +477,7 @@ async function gemini(prompt,label){
         throw pe;
       }
       if(wasTrunc&&i<attempts){
-        log(`    ${label}: retrying smaller so nothing is lost.`,'wa');
+        log(`    ${label}: reply was cut off, retrying with fewer items.`,'wa');
         p=prompt+TRUNC_HINT; wasTrunc=false; S.fails++; metrics(); await sleep(600);
         continue;
       }
@@ -494,7 +494,7 @@ async function gemini(prompt,label){
       else if(st===429){
         const ra=err.retryAfter||(/try again in ([\d.]+)\s*s/i.exec(err.message)||[])[1];
         wait=ra?Math.ceil(Number(ra)*1000)+900:8000;
-        noteTokens(estTokens(p));   // the attempt still spent budget
+        noteTokens(estTokens(p,maxTokens));   // the attempt still spent budget
       } else wait=Math.min(30000,1500*Math.pow(2,i));
       log(`    ${label} attempt ${i} failed (${err.message.slice(0,80)}). Retrying in ${wait/1000}s.`,'wa');
       await sleep(wait);
@@ -638,7 +638,7 @@ async function doScope(){
   /* ---------- revision: one small patch call ---------- */
   if(revising){
     say('Applying your notes...');
-    const R=await gemini(qScopeRevise(c,S.scope,S.scopeNotes),'scope revision');
+    const R=await gemini(qScopeRevise(c,S.scope,S.scopeNotes),'scope revision',1600);
     say('Re-analyse with my notes'); btn.disabled=false;
     if(!R){
       el('scopeOut').classList.remove('hide');
@@ -667,7 +667,7 @@ async function doScope(){
 
   /* ---------- first pass: two calls ---------- */
   say('Step 1 of 2: what this service is...');
-  const A=await gemini(qScopeA(c),'scope A');
+  const A=await gemini(qScopeA(c),'scope A',1800);
   if(!A){ say('Analyse the service'); btn.disabled=false;
     el('scopeOut').classList.remove('hide');
     el('scopeOut').innerHTML='<div class="note bad"><b>The scope call failed.</b><br><br>'
@@ -677,7 +677,7 @@ async function doScope(){
     return; }
 
   say('Step 2 of 2: the filters...');
-  const B=await gemini(qScopeB(c,A),'scope B');
+  const B=await gemini(qScopeB(c,A),'scope B',1200);
   say('Re-analyse the service'); btn.disabled=false;
 
   const noun=c.svc.replace(/\s*(repair|service|fix|cleaning)\s*$/i,'').trim();
@@ -836,12 +836,12 @@ Strip the service noun to [SERVICE] and the city to [CITY], keeping word order a
 Rank patterns by how many DIFFERENT pages each held up on, not by volume:
 tier 1 = held on 2+ services, tier 2 = one page only, tier 3 = strong on one page but collapsed on
 another (the volume belonged to that head term), tier 4 = only ever at a floor value.
-Return at most 18 patterns.${RULES}
+Return at most 12 patterns.${RULES}
 JSON: {"patterns":[{"pattern":"","tier":1,"sources":[""],"reasoning":""}],"provisional":${c.single},"tierNotes":""}`;}
 
 function qCity(c){return `${HEAD(c)}
 
-List at most 6 conditions in ${c.city}, ${c.state} that affect ${c.svc} specifically: climate,
+List at most 5 conditions in ${c.city}, ${c.state} that affect ${c.svc} specifically: climate,
 altitude, water, power, housing stock and age, tenure split, student or seasonal population.
 One line each on how it changes the service or the advice. Mark each unverified with the source
 type needed.${SCOPE(c)}${RULES}
@@ -849,7 +849,7 @@ JSON: {"cityContext":[{"factor":"","detail":"","effectOnService":"","verificatio
 
 function qIcp(c){return `${HEAD(c)}
 
-Give at most 5 ICP segments for ${c.svc} in ${c.city}. Separate segments, not an average.
+Give at most 4 ICP segments for ${c.svc} in ${c.city}. Separate segments, not an average.
 Per segment: the trigger that makes them search, the driver that makes them call, and the one page
 section that exists for them.${SCOPE(c)}${RULES}
 JSON: {"icp":[{"segment":"","trigger":"","decisionDriver":"","sectionItNeeds":""}]}`;}
@@ -869,8 +869,7 @@ commercial_vs_residential, seasonal, diy_boundary.
 For each family with ZERO inherited keywords, mark "genuinely_absent" with a reason, or
 "likely_blind_spot". Never default to absent just because nothing was supplied. Give the autocomplete
 fragment to type and whether it should be retrofitted into the already published pages.
-At most 6 blind spots. Keep reasoning under 12 words and skip families with a zero count
-in part A.${SCOPE(c)}${RULES}
+At most 5 blind spots. Keep reasoning under 10 words and skip families with a zero count in part A.${SCOPE(c)}${RULES}
 JSON: {"families":[{"family":"","count":0}],
 "blindSpots":[{"family":"","verdict":"likely_blind_spot","reasoning":"","autocompleteSeed":"","retrofitExisting":true}]}`;}
 
@@ -880,8 +879,7 @@ VALIDATED PATTERNS: ${JSON.stringify((pats||[]).slice(0,18)).slice(0,2200)}
 
 Build the location keyword set for ${c.svc} in ${c.city}, ${c.state} from these patterns.
 ${ROOTS(c)}
-Include state suffix forms even at low tiers. Return at most 30 keywords, each with its tier and the
-pattern it came from.${SCOPE(c)}${NEARBAN(c)}${RULES}
+Include state suffix forms even at low tiers. Return at most 26 keywords, each with its tier and the pattern it came from.${SCOPE(c)}${NEARBAN(c)}${RULES}
 JSON: {"locationKeywords":[{"keyword":"","tier":1,"sourcePattern":""}]}`;}
 
 function qTransfer(c){return `${HEAD(c)}
@@ -895,8 +893,7 @@ must name the sourceKeyword it came from. No ancestor means it does not belong h
 Verdicts: transfers_as_is, transforms, dies, splits.
 For transforms give the role the keyword plays (e.g. "the number one complaint", "the urgent safety
 one", "the cycle ran but the job is not done") and why a literal swap would fail.
-Match by ROLE, not vocabulary. Return at most 6 concepts. Keep customerSituation and whyNotASwap
-under 15 words each.
+Match by ROLE, not vocabulary. Return at most 5 concepts. Keep customerSituation and whyNotASwap under 12 words each.
 ${ROOTS(c)}${SCOPE(c)}${NEARBAN(c)}${RULES}
 JSON: {"concepts":[{"family":"","verdict":"transforms","sourceKeyword":"","role":"","newKeywords":[""],"whyNotASwap":""}]}`;}
 
@@ -952,8 +949,7 @@ function qFailures(c){return `Technical research. SERVICE: ${c.svc}.
 Do not brainstorm failures. Derive them from what maker parts diagrams, error code lists and service
 manual troubleshooting tables contain. Give the technical name AND the customer wording.
 "Igniter failure" is the manual, "oven won't light" is the search. Give both.
-Mark each unverified with the maker source needed. At most 8 failures, 3 keywords each.
-Keep cause and verification under 12 words each.${SCOPE(c)}${NEARBAN(c)}${RULES}
+Mark each unverified with the maker source needed. At most 7 failures, 3 keywords each. Keep cause and verification under 10 words each.${SCOPE(c)}${NEARBAN(c)}${RULES}
 JSON: {"failures":[{"technicalName":"","customerWording":"","cause":"","keywords":[""],"verification":""}]}`;}
 
 function qRegLocal(c){return `Technical research. SERVICE: ${c.svc}. LOCATION: ${c.city}, ${c.state}.
@@ -1120,21 +1116,21 @@ async function doRun(){
   const pause=()=>sleep(S.delay||2200);
 
   const tasks=[
-    ['Patterns',                 ()=>qPatterns(c),                      r=>S.stages.s1=r||{}],
-    ['City conditions',          ()=>qCity(c),                          r=>merge('s2',r)],
-    ['Customer segments',        ()=>qIcp(c),                           r=>merge('s2',r)],
-    ['Families and blind spots', ()=>qFamilies(c),                      r=>merge('s2',r)],
-    ['Location keywords',        ()=>qLocation(c,S.stages.s1?.patterns),r=>merge('s3',r)],
-    ['Concept transfers',        ()=>qTransfer(c),                      r=>merge('s3',r)],
-    ['Brands carried over',      ()=>qBrandsMapped(c),                  r=>merge('s3',r)],
+    ['Patterns',                 ()=>qPatterns(c),                      r=>S.stages.s1=r||{}, 2600],
+    ['City conditions',          ()=>qCity(c),                          r=>merge('s2',r), 2200],
+    ['Customer segments',        ()=>qIcp(c),                           r=>merge('s2',r), 2000],
+    ['Families and blind spots', ()=>qFamilies(c),                      r=>merge('s2',r), 2400],
+    ['Location keywords',        ()=>qLocation(c,S.stages.s1?.patterns),r=>merge('s3',r), 2600],
+    ['Concept transfers',        ()=>qTransfer(c),                      r=>merge('s3',r), 2400],
+    ['Brands carried over',      ()=>qBrandsMapped(c),                  r=>merge('s3',r), 2000],
   ];
   c.fams.forEach(f=>tasks.push(['Expand: '+f,
     ()=>qExpand(c,f,S.stages.s2?.cityContext,S.stages.s2?.icp,buildMaster().map(m=>m.keyword)),
-    r=>{if(r&&r.keywords){S.stages.s4=S.stages.s4||{expansions:[]};S.stages.s4.expansions.push(r);}}]));
+    r=>{if(r&&r.keywords){S.stages.s4=S.stages.s4||{expansions:[]};S.stages.s4.expansions.push(r);}}, 2000]));
   tasks.push(
-    ['Blind: physical build',    ()=>qPhysical(c),                      r=>merge('s5',r)],
-    ['Blind: failure list',      ()=>qFailures(c),                      r=>merge('s5',r)],
-    ['Blind: rules and local',   ()=>qRegLocal(c),                      r=>merge('s5',r)],
+    ['Blind: physical build',    ()=>qPhysical(c),                      r=>merge('s5',r), 2200],
+    ['Blind: failure list',      ()=>qFailures(c),                      r=>merge('s5',r), 2600],
+    ['Blind: rules and local',   ()=>qRegLocal(c),                      r=>merge('s5',r), 2400],
     ['Tiers, size, summary',     ()=>qJudge(c,buildMaster().length),    r=>merge('s6',r)],
     ['Conflicts and links',      ()=>qLinks(c),                         r=>merge('s6',r)],
     ['Entities',                ()=>qEntities(c),                          r=>merge('s6',r)],
@@ -1144,16 +1140,16 @@ async function doRun(){
 
   for(let i=0;i<tasks.length;i++){
     if(S.stop)break;
-    const [label,mk,into]=tasks[i];
+    const [label,mk,into,want]=tasks[i];
     el('phase').textContent=`${label} — step ${i+1} of ${tasks.length}`;
     el('prog').style.width=Math.round(i/tasks.length*100)+'%';
     log(`${i+1}/${tasks.length} ${label}`,'go');
     const before=S.kw;
-    let r=await gemini(mk(),label);
+    let r=await gemini(mk(),label,want);
     if(!r&&!S.stop&&!S.fatal){
       log(`  ${label}: nothing returned. Waiting a full minute and trying once more.`,'wa');
       await sleep(62000);
-      r=await gemini(mk(),label);
+      r=await gemini(mk(),label,want);
     }
     if(r)into(r);else{S.lostStages=(S.lostStages||[]).concat(label);
       log(`  ${label}: still nothing, moving on`,'er');}
@@ -1176,7 +1172,7 @@ async function doRun(){
       el('phase').textContent=`Validating keywords — batch ${b+1} of ${batches}`;
       el('prog').style.width=Math.round(90+10*(b/batches))+'%';
       log(`Validating ${b+1}/${batches} (${slice.length} keywords)`,'go');
-      const r=await gemini(qValidate(c,slice,b*size),`validation ${b+1}`);
+      const r=await gemini(qValidate(c,slice,b*size),`validation ${b+1}`,1400);
       const v=(r&&r.violations)||[];
       if(v.length)log(`  ${v.length} flagged`,'wa'); else log('  all clear','ok');
       S.violations=S.violations.concat(v);
