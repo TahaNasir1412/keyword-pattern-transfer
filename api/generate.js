@@ -138,8 +138,10 @@ module.exports = async function handler(req, res) {
       return res.status(500).json({ error: 'OPENAI_BASE_URL is not set, so the OpenAI-compatible provider cannot be used.' });
     }
 
-    // Many free models cap completion tokens well below 16k, so keep this modest.
-    const cap = Math.min(maxTokens, 8000);
+    // Providers count prompt + max_tokens against the tokens-per-minute budget, so asking for a
+    // huge completion burns the budget even when the reply is short. These prompts never need more
+    // than about 1200 tokens of output.
+    const cap = Math.min(maxTokens, 1500);
 
     async function ask(useJsonMode) {
       const payload = {
@@ -191,7 +193,10 @@ module.exports = async function handler(req, res) {
 
     if (!r.ok) {
       const msg = (data && data.error && (data.error.message || data.error.code || data.error)) || ('Provider returned ' + r.status);
+      const retryHeader = r.headers.get('retry-after');
+      const fromMsg = /try again in ([\d.]+)\s*s/i.exec(String(msg));
       return res.status(r.status).json({
+        retryAfter: retryHeader ? Number(retryHeader) : (fromMsg ? Number(fromMsg[1]) : null),
         error: typeof msg === 'string' ? msg : JSON.stringify(msg),
         status: r.status, provider: provider, model: model,
         hint: r.status === 404 || /decommission|not found|does not exist/i.test(String(msg))
@@ -207,7 +212,8 @@ module.exports = async function handler(req, res) {
       finishReason: (choice && choice.finish_reason) === 'length' ? 'MAX_TOKENS' : 'STOP',
       provider: provider,
       model: model,
-      autoSelected: Boolean(discovered)
+      autoSelected: Boolean(discovered),
+      usage: data.usage || null
     });
 
   } catch (err) {
