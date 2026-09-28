@@ -12,6 +12,31 @@
 
 const GROQ_BASE = 'https://api.groq.com/openai/v1';
 
+// Groq retires models often. llama-3.3-70b-versatile was deprecated on 17 June 2026 and the
+// announced replacement is openai/gpt-oss-120b. Rather than trust any single name forever, the
+// function falls back to asking the provider what it actually serves.
+const PREFERRED = [
+  'openai/gpt-oss-120b',
+  'qwen/qwen3.8-27b',
+  'openai/gpt-oss-20b',
+  'moonshotai/kimi-k2-instruct'
+];
+const NOT_CHAT = /whisper|tts|guard|embed|vision-only|distil/i;
+
+async function discoverModel(base, key) {
+  try {
+    const r = await fetch(base + '/models', { headers: { 'Authorization': 'Bearer ' + key } });
+    if (!r.ok) return null;
+    const d = await r.json();
+    const ids = ((d && d.data) || []).map(function (m) { return m.id; }).filter(Boolean);
+    for (var i = 0; i < PREFERRED.length; i++) {
+      if (ids.indexOf(PREFERRED[i]) !== -1) return PREFERRED[i];
+    }
+    const usable = ids.filter(function (id) { return !NOT_CHAT.test(id); });
+    return usable[0] || null;
+  } catch (e) { return null; }
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -30,6 +55,7 @@ module.exports = async function handler(req, res) {
       keys: keys,
       hasKey: any,
       baseUrl: process.env.OPENAI_BASE_URL || null,
+      model: process.env.GROQ_MODEL || process.env.OPENAI_MODEL || PREFERRED[0],
       message: any
         ? 'Serverless function is running. Keys found: ' +
           Object.keys(keys).filter(function (k) { return keys[k]; }).join(', ')
@@ -105,8 +131,8 @@ module.exports = async function handler(req, res) {
     const isGroq = provider === 'groq';
     const base = isGroq ? GROQ_BASE : (process.env.OPENAI_BASE_URL || '').replace(/\/+$/, '');
     const key = isGroq ? process.env.GROQ_API_KEY : process.env.OPENAI_API_KEY;
-    const model = body.model || process.env.GROQ_MODEL || process.env.OPENAI_MODEL
-      || (isGroq ? 'llama-3.3-70b-versatile' : 'gpt-4o-mini');
+    let model = body.model || process.env.GROQ_MODEL || process.env.OPENAI_MODEL
+      || (isGroq ? PREFERRED[0] : 'gpt-4o-mini');
 
     if (!base) {
       return res.status(500).json({ error: 'OPENAI_BASE_URL is not set, so the OpenAI-compatible provider cannot be used.' });
@@ -135,8 +161,23 @@ module.exports = async function handler(req, res) {
     }
 
     let out = await ask(true);
+
     // Some models reject JSON mode outright. Try again without it before giving up.
     if (!out.rr.ok && out.rr.status === 400) out = await ask(false);
+
+    // Model retired or not on this account: ask the provider what it serves and retry once.
+    let discovered = null;
+    if (!out.rr.ok && (out.rr.status === 404 || out.rr.status === 400)) {
+      const msg = String((out.js && out.js.error && (out.js.error.message || out.js.error.code)) || '');
+      if (/decommission|does not exist|not found|no access|deprecat/i.test(msg) || out.rr.status === 404) {
+        discovered = await discoverModel(base, key);
+        if (discovered && discovered !== model) {
+          model = discovered;
+          out = await ask(true);
+          if (!out.rr.ok && out.rr.status === 400) out = await ask(false);
+        }
+      }
+    }
 
     const r = out.rr;
     const data = out.js;
@@ -154,7 +195,7 @@ module.exports = async function handler(req, res) {
         error: typeof msg === 'string' ? msg : JSON.stringify(msg),
         status: r.status, provider: provider, model: model,
         hint: r.status === 404 || /decommission|not found|does not exist/i.test(String(msg))
-          ? 'That model name is no longer available. Open console.groq.com/docs/models and set GROQ_MODEL in Vercel to a current one.'
+          ? 'That model is gone and automatic discovery could not find a replacement. Open console.groq.com/docs/models, pick a current chat model, and set GROQ_MODEL in Vercel.'
           : (r.status === 401 ? 'The key was rejected. Check GROQ_API_KEY in Vercel and redeploy.'
           : (r.status === 429 ? 'Rate limited. Wait a minute and run again.' : undefined))
       });
@@ -164,7 +205,9 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({
       text: (choice && choice.message && choice.message.content) || '',
       finishReason: (choice && choice.finish_reason) === 'length' ? 'MAX_TOKENS' : 'STOP',
-      provider: provider
+      provider: provider,
+      model: model,
+      autoSelected: Boolean(discovered)
     });
 
   } catch (err) {
