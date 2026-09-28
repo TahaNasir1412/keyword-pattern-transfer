@@ -505,32 +505,11 @@ function countKw(){
 /* ================= SCOPE: what this service is, and is not ================= */
 S.scope=null;
 
-function qScopeA(c){
-const prev=S.scope;
-const revising=Boolean(prev&&S.scopeNotes);
-return `You are a local SEO strategist about to research keywords for one service page.
+function qScopeA(c){return `You are a local SEO strategist about to research keywords for one service page.
 
 SERVICE TERM: "${c.svc}"${c.root2?` (also written "${c.root2}")`:''}
 CITY: ${c.city}, ${c.state}
-${revising?`
-YOU ARE REVISING AN EXISTING SCOPE, NOT WRITING A NEW ONE.
 
-PREVIOUS SCOPE:
-${JSON.stringify({productDefinition:prev.productDefinition,includes:prev.includes,excludes:prev.excludes,ambiguities:prev.ambiguities}).slice(0,2600)}
-
-THE OPERATOR'S NOTES:
-${S.scopeNotes}
-
-RULES FOR REVISING:
-1. Change ONLY what the notes require. Everything the notes do not mention must come back BYTE FOR
-   BYTE IDENTICAL to the previous scope. Do not reword, reorder or improve anything else.
-2. Record every change you make in "changes", saying which note caused it. If you change something
-   no note asked for, you must still record it and justify it, and you should almost never do this.
-3. If a note is wrong, or would damage the page, SAY SO in "pushback". Give your reasoning and state
-   whether you applied it anyway. The operator has asked to be argued with when they are mistaken.
-   Apply the note unless it is factually wrong, in which case explain and apply the correct version.
-4. Never silently ignore a note. Every note appears in "changes" or in "pushback" or both.
-`:''}
 Define what this page is about. Be brief and concrete.
 - productDefinition: what this machine or service physically is. Under 30 words.
 - customerCalls: words real customers use for it. At most 4.
@@ -538,36 +517,16 @@ Define what this page is about. Be brief and concrete.
 - excludes: neighbouring services that must NOT appear here. At most 5. Include every appliance that
   sits near this one or shares a room with it. Keep "why" under 10 words.
 - ambiguities: other readings of the phrase that are NOT ours. At most 2.
-${revising?`- changes: at most 6, each under 20 words.
-- pushback: at most 3, only where you disagree with a note.`:'- changes and pushback: return empty arrays, this is the first pass.'}
 ${RULES_BASE}
 JSON: {"productDefinition":"","customerCalls":[""],"includes":[""],
 "excludes":[{"service":"","why":"","ownPage":true}],
-"ambiguities":[{"reading":"","whyNotOurs":""}],
-"changes":[{"what":"","from":"","to":"","causedByNote":"","why":""}],
-"pushback":[{"note":"","concern":"","applied":true,"reasoning":""}]}`;}
+"ambiguities":[{"reading":"","whyNotOurs":""}]}`;}
 
 function qScopeB(c,a){return `Keyword scope filters for a service page.
 
 SERVICE: "${c.svc}"${c.root2?` (also "${c.root2}")`:''} in ${c.city}, ${c.state}
 THIS PAGE IS ABOUT: ${a?.productDefinition||c.svc}
 OFF THIS PAGE: ${(a?.excludes||[]).map(e=>e.service).join(', ')||'none listed'}
-${(S.scope&&S.scopeNotes)?`
-YOU ARE REVISING EXISTING FILTERS, NOT WRITING NEW ONES.
-
-PREVIOUS FILTERS:
-requiredTerms: ${(S.scope.requiredTerms||[]).join(', ')}
-bannedTerms: ${(S.scope.bannedTerms||[]).join(', ')}
-
-THE OPERATOR'S NOTES:
-${S.scopeNotes}
-
-Change ONLY what the notes require. Every other term comes back identical. Record each change in
-"changes" naming the note that caused it. If a note would break the filters, say so in "pushback"
-with your reasoning, and state whether you applied it. Never silently ignore a note.
-Remember: a banned term also removes legitimate combination keywords. If a note asks to keep a
-combination term, the matching word must come OUT of bannedTerms, and you should say so.
-`:''}
 
 Produce two filter lists and one sentence. Nothing else.
 - requiredTerms: the product noun and its common variants. Every keyword must contain one of these.
@@ -577,9 +536,43 @@ Produce two filter lists and one sentence. Nothing else.
 - fragmentWarning: one sentence saying a keyword must be a phrase a person would type, never a bare
   part name or a two-word symptom label.
 ${RULES_BASE}
-JSON: {"requiredTerms":[""],"bannedTerms":[""],"fragmentWarning":"",
-"changes":[{"what":"","from":"","to":"","causedByNote":"","why":""}],
-"pushback":[{"note":"","concern":"","applied":true,"reasoning":""}]}`;}
+JSON: {"requiredTerms":[""],"bannedTerms":[""],"fragmentWarning":""}`;}
+
+/* Revision is a PATCH, not a rewrite. The changes come first in the JSON so a short reply
+   can never drop them, and the patch only carries fields that actually move. */
+function qScopeRevise(c,prev,notes){return `You are revising an agreed keyword scope for a service page.
+
+SERVICE: "${c.svc}" in ${c.city}, ${c.state}
+
+THE CURRENT SCOPE:
+productDefinition: ${prev.productDefinition||''}
+includes: ${(prev.includes||[]).join(' · ')}
+excludes: ${(prev.excludes||[]).map(e=>typeof e==='string'?e:e.service).join(' · ')}
+requiredTerms: ${(prev.requiredTerms||[]).join(', ')}
+bannedTerms: ${(prev.bannedTerms||[]).join(', ')}
+
+THE OPERATOR'S NOTES:
+${notes}
+
+Your job is to produce a PATCH, not a new scope.
+
+1. Work out exactly what the notes require. Return ONLY the fields that must move, in "patch".
+   Any field the notes do not touch must be left out of the patch entirely. Do not restate it.
+2. Every note must be accounted for. Each one appears in "changes", or in "pushback", or both.
+3. If a note is mistaken or would damage the page, say so in "pushback" with your reasoning and
+   whether you applied it anyway. The operator has asked to be told when they are wrong. Apply the
+   note unless it is factually incorrect, in which case explain and apply the correct version.
+4. If a note asks to KEEP a combination keyword, the blocking word must be REMOVED from bannedTerms.
+   Say that explicitly. Banning a word also kills legitimate combination terms that contain it.
+5. If the notes require nothing because the scope already satisfies them, return an empty patch and
+   say exactly that in "pushback" with the reason.
+
+Keep every string under 20 words. At most 6 changes and 3 pushback items.
+${RULES_BASE}
+JSON: {"changes":[{"what":"","from":"","to":"","causedByNote":"","why":""}],
+"pushback":[{"note":"","concern":"","applied":true,"reasoning":""}],
+"patch":{"productDefinition":"","includes":[""],"excludes":[{"service":"","why":"","ownPage":true}],
+"requiredTerms":[""],"bannedTerms":[""]}}`;}
 
 const SCOPE=c=>{
   const s=S.scope; if(!s)return '';
@@ -604,11 +597,44 @@ async function doScope(){
   if(!c.svc||!c.city)return alert('Add the service and the city first.');
   if(!await connect()){alert('No API connection.\n\nCheck the message at the top of the page.');
     el('srv').scrollIntoView({behavior:'smooth',block:'center'});return;}
+
   const btn=el('analyse'); btn.disabled=true;
   const say=t=>{btn.textContent=t;};
   S.t0=S.t0||Date.now();
+  const revising=Boolean(S.scope&&S.scopeNotes);
 
-  say(S.scopeNotes?'Revising with your notes, step 1 of 2...':'Step 1 of 2: what this service is...');
+  /* ---------- revision: one small patch call ---------- */
+  if(revising){
+    say('Applying your notes...');
+    const R=await gemini(qScopeRevise(c,S.scope,S.scopeNotes),'scope revision');
+    say('Re-analyse with my notes'); btn.disabled=false;
+    if(!R){
+      el('scopeOut').classList.remove('hide');
+      el('scopeOut').insertAdjacentHTML('afterbegin',
+        '<div class="note bad"><b>The revision call failed.</b><br><br><span class="mono">'
+        +esc(S.lastError||'no reason reported')+'</span><br><br>Edit the two filter boxes by hand, '
+        +'which always wins, or press the button again.</div>');
+      return;
+    }
+    S.changes=R.changes||[]; S.pushback=R.pushback||[]; S.lastNotes=S.scopeNotes;
+
+    const p=R.patch||{};
+    const applied=[];
+    ['productDefinition','includes','excludes','requiredTerms','bannedTerms','ambiguities'].forEach(k=>{
+      const v=p[k];
+      const empty=(v==null)||(Array.isArray(v)&&(v.length===0||v.every(x=>!x||(typeof x==='object'&&!x.service&&!x.reading))))
+        ||(typeof v==='string'&&!v.trim());
+      if(!empty){S.scope[k]=v;applied.push(k);}
+    });
+    S.patchedFields=applied;
+    log('Scope revision: '+(applied.length?('changed '+applied.join(', ')):'no field changed')
+        +' | '+S.changes.length+' logged, '+S.pushback.length+' pushback','ok');
+    renderScope();
+    return;
+  }
+
+  /* ---------- first pass: two calls ---------- */
+  say('Step 1 of 2: what this service is...');
   const A=await gemini(qScopeA(c),'scope A');
   if(!A){ say('Analyse the service'); btn.disabled=false;
     el('scopeOut').classList.remove('hide');
@@ -622,12 +648,9 @@ async function doScope(){
   const B=await gemini(qScopeB(c,A),'scope B');
   say('Re-analyse the service'); btn.disabled=false;
 
-  S.changes=[].concat(A.changes||[],(B&&B.changes)||[]);
-  S.pushback=[].concat(A.pushback||[],(B&&B.pushback)||[]);
-  S.lastNotes=S.scopeNotes||'';   // kept visible in the box so it can be edited and re-run
-
   const noun=c.svc.replace(/\s*(repair|service|fix|cleaning)\s*$/i,'').trim();
   const noun2=c.root2?c.root2.replace(/\s*(repair|service|fix|cleaning)\s*$/i,'').trim():'';
+  S.changes=[];S.pushback=[];S.lastNotes='';S.patchedFields=null;
   S.scope={
     productDefinition:A.productDefinition||c.svc,
     customerCalls:A.customerCalls||[noun],
@@ -659,11 +682,16 @@ function renderScope(){
   if(S.lastNotes){
     audit+=`<div class="note"><b>Your notes on the last pass:</b><br><span class="mono">${esc(S.lastNotes)}</span></div>`;
     audit+=`<h3 style="margin-top:18px">What changed, and why</h3>`;
+    const moved=(S.patchedFields||[]).length;
     audit+=(S.changes&&S.changes.length)
       ? table(S.changes,[['Changed','what'],['From','from'],['To','to'],['Which note','causedByNote'],['Why','why']],0)
-      : `<div class="note bad">Nothing was reported as changed. If the scope still moved, the model
-         revised without recording it. Press <b>Re-analyse with my notes</b> again, or edit the two
-         filter boxes by hand, which always wins.</div>`;
+      : (moved
+        ? `<div class="note bad">It changed <b>${esc((S.patchedFields||[]).join(', '))}</b> without
+           logging why. Treat that as unexplained. Check the two boxes below before confirming.</div>`
+        : `<div class="note"><b>Nothing changed, and nothing needed to.</b> The model judged the
+           current scope already satisfies your note. If you disagree, the pushback below should say
+           why, or just type the term straight into the boxes, which always wins.</div>`);
+    if(moved)audit+=`<p class="sdesc">Fields actually updated: <b>${esc((S.patchedFields||[]).join(', '))}</b>. Everything else was left untouched.</p>`;
     if(S.pushback&&S.pushback.length){
       audit+=`<h3>Where it disagrees with you</h3>
         <p class="sdesc">You asked to be argued with. These are the notes it thinks are wrong, and
