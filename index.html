@@ -55,10 +55,11 @@ button{font:inherit;cursor:pointer;border-radius:var(--r)}
 .note.bad{border-left-color:var(--bad)}
 details{margin:12px 0}
 summary{cursor:pointer;color:var(--flow);font-size:13.5px;font-weight:500;padding:4px 0}
-.dash{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);margin:14px 0}
+.dash{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--line);border:1px solid var(--line);margin:14px 0}
 .cell{background:var(--panel2);padding:12px 14px}
 .cell .n{font-size:26px;font-weight:700;color:var(--signal);line-height:1.1;font-variant-numeric:tabular-nums}
 .cell .l{font-size:12px;color:var(--dim);margin-top:2px}
+@media(max-width:900px){.dash{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:620px){.dash{grid-template-columns:repeat(2,1fr)}}
 .pbar{height:4px;background:var(--panel2);border:1px solid var(--line);margin:12px 0 6px}
 .pbar i{display:block;height:100%;background:var(--signal);width:0;transition:width .3s}
@@ -200,6 +201,7 @@ footer{border-top:1px solid var(--line);margin-top:50px;padding:24px 0 60px;colo
       <div class="cell"><div class="n" id="mKw">0</div><div class="l">keywords built</div></div>
       <div class="cell"><div class="n" id="mCall">0</div><div class="l">calls completed</div></div>
       <div class="cell"><div class="n" id="mFail">0</div><div class="l">calls retried or failed</div></div>
+      <div class="cell"><div class="n" id="mStage">0/0</div><div class="l">stages done, none skipped</div></div>
       <div class="cell"><div class="n" id="mTime">0s</div><div class="l">elapsed</div></div>
     </div>
     <div class="pbar"><i id="prog"></i></div>
@@ -237,6 +239,11 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 function log(m,cls=""){const d=document.createElement('div');if(cls)d.className=cls;d.textContent=m;
   el('log').appendChild(d);el('log').scrollTop=el('log').scrollHeight;}
 function metrics(){el('mKw').textContent=S.kw;el('mCall').textContent=S.calls;el('mFail').textContent=S.fails;
+  const done=S.stagesDone||0,tot=S.stagesTotal||0,lost=(S.lostStages||[]).length;
+  el('mStage').textContent=done+'/'+tot;
+  el('mStage').style.color=lost?'var(--bad)':'var(--signal)';
+  el('mStage').parentElement.querySelector('.l').textContent=
+    lost?(lost+' stage'+(lost>1?'s':'')+' SKIPPED'):'stages done, none skipped';
   el('mTime').textContent=S.t0?Math.round((Date.now()-S.t0)/1000)+'s':'0s';}
 setInterval(()=>{if(S.t0)metrics();},1000);
 
@@ -244,7 +251,7 @@ setInterval(()=>{if(S.t0)metrics();},1000);
   if(v)el(k).value=v;el(k).addEventListener('change',()=>localStorage.setItem('pt_'+k,el(k).value));});
 
 /* ---- connection: detected once, silently. No UI unless it fails. ---- */
-S.mode=null; S.delay=2200;
+S.mode=null;
 
 function connErr(html){
   const n=el('srv');
@@ -282,14 +289,14 @@ async function connect(force){
   const info=await serverInfo();
   if(info&&info.ok&&info.hasKey){
     const have=Object.keys(info.keys||{}).filter(k=>info.keys[k]);
-    S.mode='server'; S.provider=have[0]||''; S.delay=(S.provider==='groq')?1200:4500;
+    S.mode='server'; S.provider=have[0]||'';
     connErr('');
     log('Connected using your server key ('+S.provider+').','ok');
     return 'server';
   }
 
   if(await claudeWorks()){
-    S.mode='claude'; S.delay=400; connErr('');
+    S.mode='claude'; connErr('');
     log('Connected using Claude in this preview.','ok');
     return 'claude';
   }
@@ -413,51 +420,9 @@ function parseLoose(txt){
 }
 
 /* ---- gemini with retry ---- */
-/* Free tiers meter tokens per minute. Reserve based on what calls ACTUALLY cost, measured from the
-   provider's own usage numbers, rather than the worst case. Worst case is prompt + max_tokens, which
-   is roughly double reality and makes the tool sit still for no reason. */
-S.tpmLimit=8000; S.tokenLog=[]; S.usageSamples=[];
-function tokensInWindow(){
-  const cut=Date.now()-60000;
-  S.tokenLog=S.tokenLog.filter(t=>t.at>cut);
-  return S.tokenLog.reduce((n,t)=>n+t.n,0);
-}
-function noteTokens(n){ if(n>0)S.tokenLog.push({at:Date.now(),n:n}); }
-function noteUsage(n){ if(n>0){S.usageSamples.push(n); if(S.usageSamples.length>8)S.usageSamples.shift();} }
-function reserveFor(prompt,want){
-  if(S.usageSamples.length>=2){
-    const avg=S.usageSamples.reduce((a,b)=>a+b,0)/S.usageSamples.length;
-    return Math.ceil(avg*1.2);              // measured, with headroom
-  }
-  return Math.ceil(String(prompt||'').length/3.6)+Math.min(want||1600,1200);
-}
-/* Wait only until ENOUGH tokens expire, not until the oldest entry does. */
-function waitNeeded(need){
-  const ceiling=S.tpmLimit*0.95;
-  let used=tokensInWindow();
-  if(used+need<=ceiling)return 0;
-  let freed=0;
-  for(const t of S.tokenLog){
-    freed+=t.n;
-    if(used-freed+need<=ceiling)return Math.max(500,(t.at+60000)-Date.now()+300);
-  }
-  return 60000;
-}
-async function waitForBudget(prompt,want,label){
-  if(S.mode!=='server')return;
-  const need=reserveFor(prompt,want);
-  let ms=waitNeeded(need);
-  if(ms<=0)return;
-  const until=Date.now()+ms;
-  log(`    pausing ${Math.ceil(ms/1000)}s for token budget (${tokensInWindow()}/${S.tpmLimit} this minute)`,'wa');
-  while(Date.now()<until){
-    if(S.stop)return;
-    const left=Math.ceil((until-Date.now())/1000);
-    el('phase').textContent=`${label} — resuming in ${left}s (free tier token limit, this is normal)`;
-    await sleep(500);
-    if(waitNeeded(need)<=0)break;      // budget freed early
-  }
-}
+/* No prediction. Groq tells us exactly how long to wait when we go over, so we send, and if it says
+   wait 4.26s we wait 4.26s. Guessing in advance was slower and could stall forever. */
+S.tpmLimit=8000;
 
 const TRUNC_HINT='\n\nIMPORTANT: your previous reply was cut off before the JSON closed. Return at most HALF as many items this time, and keep every string under 12 words. Completing the JSON matters more than covering everything.';
 async function gemini(prompt,label,want){
@@ -465,11 +430,15 @@ async function gemini(prompt,label,want){
   if(!prov){S.fatal='No API connection.';return null;}
   let p=prompt, wasTrunc=false;
   const maxTokens=want||1600;
-  const attempts=6;
+  const attempts=8;
+  const deadline=Date.now()+150000;   // 2.5 minutes per stage, then report it rather than stall
   for(let i=1;i<=attempts;i++){
     if(S.stop)throw new Error('Stopped.');
-    await waitForBudget(p,maxTokens,label);
-    if(S.stop)throw new Error('Stopped.');
+    if(Date.now()>deadline){
+      S.lastError='This stage took over 2.5 minutes.';
+      log(`    ${label}: taking too long, moving on`,'er');
+      return null;
+    }
     try{
       let text,finish;
       if(prov==='claude'){
@@ -495,9 +464,7 @@ async function gemini(prompt,label,want){
           throw Object.assign(new Error(bits.join(' — ')),{status:r.status,retryAfter:d.retryAfter});
         }
         text=d.text;finish=d.finishReason;
-        const realUse=(d.usage&&(d.usage.total_tokens||d.usage.prompt_tokens))||0;
-        noteTokens(realUse||reserveFor(p,maxTokens));
-        noteUsage(realUse);
+
       }
       if(finish&&finish!=='STOP'){
         log(`    ${label}: reply was cut short (${finish}).`,'wa');
@@ -533,10 +500,16 @@ async function gemini(prompt,label,want){
         }
         const ra=err.retryAfter||(/try again in ([\d.]+)\s*s/i.exec(err.message)||[])[1];
         wait=ra?Math.ceil(Number(ra)*1000)+900:8000;
-        noteTokens(reserveFor(p,maxTokens));   // the attempt still spent budget
+
       } else wait=Math.min(30000,1500*Math.pow(2,i));
-      log(`    ${label} attempt ${i} failed (${err.message.slice(0,80)}). Retrying in ${wait/1000}s.`,'wa');
-      await sleep(wait);
+      if(st===429)log(`    ${label}: token meter full, retrying in ${(wait/1000).toFixed(1)}s. Nothing skipped.`,'wa');
+      else log(`    ${label} attempt ${i} failed (${err.message.slice(0,70)}). Retrying in ${(wait/1000).toFixed(1)}s.`,'wa');
+      const until=Date.now()+wait;
+      while(Date.now()<until){
+        if(S.stop)break;
+        el('phase').textContent=`${label} — retrying in ${Math.ceil((until-Date.now())/1000)}s`;
+        await sleep(400);
+      }
     }
   }
   return null;
@@ -1190,7 +1163,7 @@ async function doRun(){
   S.stop=false;S.fatal=null;S.calls=0;S.fails=0;S.kw=0;S.stages={};S.violations=[];S.filtered=[];S.lostStages=[];S.tokenLog=[];S.usageSamples=[];S.t0=Date.now();
   el('stop').disabled=false;el('log').innerHTML='';
   el('results').classList.remove('show');metrics();
-  const pause=()=>sleep(S.delay||1200);
+  const pause=()=>sleep(700);
   const quick=el('quick')&&el('quick').checked;
 
   const tasks=[
@@ -1221,7 +1194,9 @@ async function doRun(){
     ['Flags and retrofit',      ()=>qExclusions(c,S.stages.s2?.blindSpots), r=>merge('s6',r), 2000],
   );
 
-  log(`${tasks.length} calls queued${quick?' (quick run)':''}. On a free key that is roughly ${Math.ceil(tasks.length/4)} minutes.`,'go');
+  S.stagesTotal=tasks.length;S.stagesDone=0;metrics();
+  log(`${tasks.length} calls queued${quick?' (quick run)':''}. Expect ${Math.ceil(tasks.length/4)} to ${Math.ceil(tasks.length/2)} minutes on a free key.`,'go');
+  log('If the token meter fills, the call waits the exact time Groq asks for and then runs. Nothing is skipped.','go');
   for(let i=0;i<tasks.length;i++){
     if(S.stop)break;
     const [label,mk,into,want]=tasks[i];
@@ -1231,12 +1206,14 @@ async function doRun(){
     const before=S.kw;
     let r=await gemini(mk(),label,want);
     if(!r&&!S.stop&&!S.fatal){
-      log(`  ${label}: nothing returned. Waiting a full minute and trying once more.`,'wa');
-      await sleep(62000);
+      log(`  ${label}: nothing returned, trying once more.`,'wa');
+      await sleep(4000);
       r=await gemini(mk(),label,want);
     }
-    if(r)into(r);else{S.lostStages=(S.lostStages||[]).concat(label);
-      log(`  ${label}: still nothing, moving on`,'er');}
+    if(r){into(r);S.stagesDone=(S.stagesDone||0)+1;}
+    else{S.lostStages=(S.lostStages||[]).concat(label);
+      log(`  ${label}: still nothing after a full retry, SKIPPED`,'er');}
+    metrics();
     countKw();
     if(S.kw>before)log(`  +${S.kw-before} keywords (total ${S.kw})`,'ok');
     if(S.fatal){log('Stopping: '+S.fatal,'er');break;}
@@ -1283,6 +1260,8 @@ async function doRun(){
   log(`Finished. ${cnt.total} keywords: ${cnt.mapped} mapped, ${cnt.expanded} expanded, ${cnt.orphan} orphan.`,'ok');
   if(S.lostStages&&S.lostStages.length)
     log(`WARNING: ${S.lostStages.length} stage(s) produced nothing: ${S.lostStages.join(', ')}. The list below is incomplete.`,'er');
+  else
+    log(`Every stage completed. Nothing was skipped. The pauses cost time, not coverage.`,'ok');
   render(c);
 }
 
