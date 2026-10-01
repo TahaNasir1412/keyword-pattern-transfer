@@ -191,6 +191,11 @@ footer{border-top:1px solid var(--line);margin-top:50px;padding:24px 0 60px;colo
     <label style="display:inline-flex;gap:8px;align-items:center;margin-left:8px;font-size:13.5px;color:var(--dim)">
       <input type="checkbox" id="doValidate" checked style="width:auto">
       Final validation pass: read every keyword back against the confirmed scope</label>
+    <div class="note" style="margin-top:12px"><label style="display:flex;gap:9px;align-items:flex-start;color:var(--text);font-size:14px">
+      <input type="checkbox" id="quick" style="width:auto;margin-top:4px">
+      <span><b>Quick run.</b> Expands only brand, symptom, question, cost, type and urgency, and skips
+      the validation pass. Roughly a third of the calls, so it finishes in a few minutes on a free key.
+      Use it to check the output looks right, then run the full set.</span></label></div>
     <div class="dash">
       <div class="cell"><div class="n" id="mKw">0</div><div class="l">keywords built</div></div>
       <div class="cell"><div class="n" id="mCall">0</div><div class="l">calls completed</div></div>
@@ -517,6 +522,11 @@ async function gemini(prompt,label,want){
       let wait;
       if(st===0)wait=800;
       else if(st===429){
+        const lim=/Limit\s+(\d+)/i.exec(err.message);
+        if(lim&&Number(lim[1])>0&&Number(lim[1])!==S.tpmLimit){
+          S.tpmLimit=Number(lim[1]);
+          log(`    provider reports a ${S.tpmLimit} tokens-per-minute limit, pacing adjusted`,'wa');
+        }
         const ra=err.retryAfter||(/try again in ([\d.]+)\s*s/i.exec(err.message)||[])[1];
         wait=ra?Math.ceil(Number(ra)*1000)+900:8000;
         noteTokens(reserveFor(p,maxTokens));   // the attempt still spent budget
@@ -535,7 +545,9 @@ function ctx(){
     keptBrands:Object.keys(S.brands).filter(b=>S.brands[b]),
     keptNear:Object.keys(S.near).filter(k=>S.near[k]),
     dropped:Object.keys(S.brands).filter(b=>!S.brands[b]).concat(Object.keys(S.near).filter(k=>!S.near[k])),
-    fams:Object.keys(S.fams).filter(f=>S.fams[f]),
+    fams:(el('quick')&&el('quick').checked)
+      ? Object.keys(S.fams).filter(f=>S.fams[f]&&['brand','symptom','question','cost','type_variant','urgency'].includes(f))
+      : Object.keys(S.fams).filter(f=>S.fams[f]),
     single:S.pages.length<2};
 }
 /* cap what we send so a huge evidence base never blows the prompt */
@@ -931,33 +943,35 @@ For each, say whether it makes ${c.svc.replace(/ repair$/i,'')} products at all:
 Do not add brands that were not in the list above. Return at most 8 brands.${SCOPE(c)}${NEARBAN(c)}${RULES}
 JSON: {"brands":[{"brand":"","status":"makes","keywords":[""],"note":""}]}`;}
 
-function qExpand(c,fam,city,icp,known){return `${HEAD(c)}
+function qExpand(c,fams,city,icp,known){
+const list=Array.isArray(fams)?fams:[fams];
+return `${HEAD(c)}
 
 CITY CONTEXT: ${JSON.stringify((city||[]).slice(0,4).map(x=>x.factor+': '+x.effectOnService)).slice(0,700)}
 ICP: ${JSON.stringify((icp||[]).slice(0,4).map(x=>x.segment+': '+x.trigger)).slice(0,600)}
-ALREADY PRODUCED, never repeat: ${known.slice(-70).join(', ').slice(0,1100)}
+ALREADY PRODUCED, never repeat: ${known.slice(-50).join(', ').slice(0,800)}
 
-CONCEPT EXPANSION for one family only: ${fam}
+CONCEPT EXPANSION for these families: ${list.join(', ')}
+Return one object per family in "families". Do not merge them.
 
 The old pages prove which KINDS of search this town performs. Brand keywords prove the audience
 searches by brand, not merely that those brands matter. So research what "${fam}" actually produces
 for ${c.svc} in ${c.city}, and give keywords that were NEVER in the source list.
 
-If brand: work out which makers actually build this product, then which appear in this city's housing
-stock given its age, income, rental share and any student or seasonal population. Include mainstream,
-budget-in-rentals, premium, and any commercial or regional name. Exclude makers that do not build it.
+If brand: name the makers that actually build this product and plausibly appear in this city's
+housing stock, across mainstream, budget-in-rentals and premium tiers. Exclude makers that do not
+build it.
 If symptom or parts: derive from what maker parts diagrams and error code lists contain, and give the
 CUSTOMER wording, not the manual's.
 If question: write different questions for different ICP segments.
 
 LENGTH LIMITS, obey them strictly or the reply will be cut off:
-- conceptProved: under 20 words.
-- researchFindings: under 35 words. Summarise, do not narrate your reasoning.
-- keywords: 8 to 14 items. "sourceConcept" under 8 words.
-- brandVerification: ONLY if this family is "brand". For any other family return an empty array.
+- conceptProved: under 15 words. researchFindings: under 25 words.
+- keywords: 8 to 12 per family. "sourceConcept" under 6 words.
+- brandVerification: only on the "brand" family, at most 5. Empty array everywhere else.
 ${ROOTS(c)}${SCOPE(c)}${NEARBAN(c)}${RULES}
-JSON: {"family":"${fam}","conceptProved":"","researchFindings":"",
-"keywords":[{"keyword":"","sourceConcept":""}],"brandVerification":[{"brand":"","status":"makes","verifyWith":""}]}`;}
+JSON: {"families":[{"family":"","conceptProved":"","researchFindings":"",
+"keywords":[{"keyword":"","sourceConcept":""}],"brandVerification":[{"brand":"","status":"makes","verifyWith":""}]}]}`;}
 
 function qPhysical(c){return `Technical research, no keyword list has been shown to you on purpose.
 SERVICE: ${c.svc}. LOCATION: ${c.city}, ${c.state}.
@@ -1138,7 +1152,8 @@ async function doRun(){
   S.stop=false;S.fatal=null;S.calls=0;S.fails=0;S.kw=0;S.stages={};S.violations=[];S.filtered=[];S.lostStages=[];S.tokenLog=[];S.usageSamples=[];S.t0=Date.now();
   el('stop').disabled=false;el('log').innerHTML='';
   el('results').classList.remove('show');metrics();
-  const pause=()=>sleep(S.delay||2200);
+  const pause=()=>sleep(S.delay||1200);
+  const quick=el('quick')&&el('quick').checked;
 
   const tasks=[
     ['Patterns',                 ()=>qPatterns(c),                      r=>S.stages.s1=r||{}, 2600],
@@ -1149,9 +1164,17 @@ async function doRun(){
     ['Concept transfers',        ()=>qTransfer(c),                      r=>merge('s3',r), 2400],
     ['Brands carried over',      ()=>qBrandsMapped(c),                  r=>merge('s3',r), 2000],
   ];
-  c.fams.forEach(f=>tasks.push(['Expand: '+f,
-    ()=>qExpand(c,f,S.stages.s2?.cityContext,S.stages.s2?.icp,buildMaster().map(m=>m.keyword)),
-    r=>{if(r&&r.keywords){S.stages.s4=S.stages.s4||{expansions:[]};S.stages.s4.expansions.push(r);}}, 2000]));
+  const BATCH=3;
+  for(let i=0;i<c.fams.length;i+=BATCH){
+    const group=c.fams.slice(i,i+BATCH);
+    tasks.push(['Expand: '+group.join(' + '),
+      ()=>qExpand(c,group,S.stages.s2?.cityContext,S.stages.s2?.icp,buildMaster().map(m=>m.keyword)),
+      r=>{
+        const list=(r&&r.families)||((r&&r.keywords)?[r]:[]);
+        if(list.length){S.stages.s4=S.stages.s4||{expansions:[]};
+          list.forEach(e=>{if(e&&e.keywords)S.stages.s4.expansions.push(e);});}
+      }, 2800]);
+  }
   tasks.push(
     ['Blind: physical build',    ()=>qPhysical(c),                      r=>merge('s5',r), 2200],
     ['Blind: failure list',      ()=>qFailures(c),                      r=>merge('s5',r), 2600],
@@ -1163,6 +1186,7 @@ async function doRun(){
     ['Verification flags',      ()=>qFlags(c),                             r=>merge('s6',r)],
   );
 
+  log(`${tasks.length} calls queued${quick?' (quick run)':''}. On a free key that is roughly ${Math.ceil(tasks.length/4)} minutes.`,'go');
   for(let i=0;i<tasks.length;i++){
     if(S.stop)break;
     const [label,mk,into,want]=tasks[i];
@@ -1187,7 +1211,7 @@ async function doRun(){
   S.stages.s6=S.stages.s6||{};
   S.stages.s6.masterList=buildMaster();
 
-  if(el('doValidate').checked && !S.stop && S.stages.s6.masterList.length){
+  if(el('doValidate').checked && !(el('quick')&&el('quick').checked) && !S.stop && S.stages.s6.masterList.length){
     const all=S.stages.s6.masterList.map(m=>m.keyword);
     const size=25, batches=Math.ceil(all.length/size);
     S.violations=[];
