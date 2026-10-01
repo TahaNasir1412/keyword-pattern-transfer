@@ -262,7 +262,7 @@ function connErr(html){
 /* ask our own function what it has. */
 async function serverInfo(){
   try{
-    const r=await fetch('/api/generate',{method:'GET',headers:{'Accept':'application/json'}});
+    const r=await fetchWithTimeout('/api/generate',{method:'GET',headers:{'Accept':'application/json'}},12000);
     const raw=await r.text();
     let d=null; try{ d=JSON.parse(raw); }catch(e){}
     if(d&&d.ok)return d;
@@ -272,10 +272,10 @@ async function serverInfo(){
 
 async function claudeWorks(){
   try{
-    const r=await fetch('https://api.anthropic.com/v1/messages',{
+    const r=await fetchWithTimeout('https://api.anthropic.com/v1/messages',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,
-        messages:[{role:'user',content:'Reply with exactly {"ok":true}'}]})});
+        messages:[{role:'user',content:'Reply with exactly {"ok":true}'}]})},20000);
     if(!r.ok)return false;
     const d=await r.json();
     return Boolean((d.content||[]).map(x=>x.text||'').join(''));
@@ -424,6 +424,20 @@ function parseLoose(txt){
    wait 4.26s we wait 4.26s. Guessing in advance was slower and could stall forever. */
 S.tpmLimit=8000;
 
+/* A fetch with no timeout waits forever. If the serverless function dies mid-request the promise
+   simply never settles, the run freezes, and nothing is logged because nothing failed. Every call
+   below is wrapped so that can never happen again. */
+async function fetchWithTimeout(url,opts,ms){
+  const ac=new AbortController();
+  const t=setTimeout(()=>ac.abort(),ms||45000);
+  try{ return await fetch(url,{...opts,signal:ac.signal}); }
+  catch(e){
+    if(e.name==='AbortError')throw Object.assign(new Error('No response after '+Math.round((ms||45000)/1000)+'s. The request was cancelled.'),{status:408});
+    throw e;
+  }
+  finally{ clearTimeout(t); }
+}
+
 const TRUNC_HINT='\n\nIMPORTANT: your previous reply was cut off before the JSON closed. Return at most HALF as many items this time, and keep every string under 12 words. Completing the JSON matters more than covering everything.';
 async function gemini(prompt,label,want){
   const prov=S.mode||await connect();
@@ -442,18 +456,18 @@ async function gemini(prompt,label,want){
     try{
       let text,finish;
       if(prov==='claude'){
-        const r=await fetch('https://api.anthropic.com/v1/messages',{
+        const r=await fetchWithTimeout('https://api.anthropic.com/v1/messages',{
           method:'POST',headers:{'Content-Type':'application/json'},
           body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,
-            messages:[{role:'user',content:p}]})});
+            messages:[{role:'user',content:p}]})},45000);
         if(!r.ok)throw Object.assign(new Error('HTTP '+r.status),{status:r.status});
         const d=await r.json();
         text=(d.content||[]).map(x=>x.type==='text'?(x.text||''):'').join('');
         finish=d.stop_reason==='max_tokens'?'MAX_TOKENS':'STOP';
             }else{
-        const r=await fetch('/api/generate',{method:'POST',
+        const r=await fetchWithTimeout('/api/generate',{method:'POST',
           headers:{'Content-Type':'application/json','Accept':'application/json'},
-          body:JSON.stringify({prompt:p,maxTokens})});
+          body:JSON.stringify({prompt:p,maxTokens})},50000);
         const raw=await r.text();
         let d=null;try{d=JSON.parse(raw);}catch(e){
           throw Object.assign(new Error('The /api/generate route returned a web page instead of JSON, so the serverless function is not running.'),{status:0,fatal:true});}
@@ -487,7 +501,7 @@ async function gemini(prompt,label,want){
     }catch(err){
       const st=err.status||0;
       if(err.fatal){S.lastError=err.message;log('    '+label+' failed: '+err.message,'er');S.fatal=err.message;return null;}
-      const retryable=st===429||st===500||st===503||st===529||/parse|repair|Empty|truncated/i.test(err.message);
+      const retryable=st===408||st===429||st===500||st===502||st===503||st===504||st===529||/parse|repair|Empty|truncated|cancelled/i.test(err.message);
       S.fails++;metrics();
       if(i===attempts||!retryable||S.stop){S.lastError=err.message;log(`    ${label} failed: ${err.message}`,'er');return null;}
       let wait;
@@ -1173,7 +1187,7 @@ async function doRun(){
     ['Concept transfers',         ()=>qTransfer(c),                      r=>merge('s3',r), 2200],
     ['Brands carried over',       ()=>qBrandsMapped(c),                  r=>merge('s3',r), 1800],
   ];
-  const BATCH=3;
+  const BATCH=2;
   for(let i=0;i<c.fams.length;i+=BATCH){
     const group=c.fams.slice(i,i+BATCH);
     tasks.push(['Expand: '+group.join(' + '),
@@ -1201,6 +1215,11 @@ async function doRun(){
     if(S.stop)break;
     const [label,mk,into,want]=tasks[i];
     el('phase').textContent=`${label} — step ${i+1} of ${tasks.length}`;
+    const stageStart=Date.now();
+    const tick=setInterval(()=>{
+      const secs=Math.round((Date.now()-stageStart)/1000);
+      if(secs>20)el('phase').textContent=`${label} — step ${i+1} of ${tasks.length}, waiting on the model (${secs}s)`;
+    },2000);
     el('prog').style.width=Math.round(i/tasks.length*100)+'%';
     log(`${i+1}/${tasks.length} ${label}`,'go');
     const before=S.kw;
@@ -1210,6 +1229,7 @@ async function doRun(){
       await sleep(4000);
       r=await gemini(mk(),label,want);
     }
+    clearInterval(tick);
     if(r){into(r);S.stagesDone=(S.stagesDone||0)+1;}
     else{S.lostStages=(S.lostStages||[]).concat(label);
       log(`  ${label}: still nothing after a full retry, SKIPPED`,'er');}
