@@ -95,6 +95,7 @@ footer{border-top:1px solid var(--line);margin-top:50px;padding:24px 0 60px;colo
 <header><div class="wrap">
   <h1>Pattern Transfer</h1>
   <p class="sub">Keyword candidate builder for pages the tools say have no volume</p>
+  <p class="mono" style="color:var(--flow);margin:-6px 0 12px">Version: 2026-10-01 · build 12 · hard 60s stage ceiling</p>
   <p class="lede">Paste the keywords from pages you have already researched. This maps what has an ancestor, expands the concepts into keywords that were never in your list, then derives what no previous page could have told you. It does not check volume. It builds the list you take to a volume tool.</p>
   <p><a href="about.html">How this works, with examples and a diagram</a></p>
 </div></header>
@@ -427,6 +428,18 @@ S.tpmLimit=8000;
 /* A fetch with no timeout waits forever. If the serverless function dies mid-request the promise
    simply never settles, the run freezes, and nothing is logged because nothing failed. Every call
    below is wrapped so that can never happen again. */
+/* Races any promise against the clock. Whatever happens inside, the caller gets an answer.
+   A guard placed inside a loop is unreachable when the loop is what is stuck, so this one sits
+   outside everything. */
+function withDeadline(promise,ms,label){
+  let timer;
+  const bail=new Promise(res=>{timer=setTimeout(()=>{
+    log(`    ${label}: no answer after ${Math.round(ms/1000)}s, abandoning this stage and moving on`,'er');
+    res(null);
+  },ms);});
+  return Promise.race([promise,bail]).finally(()=>clearTimeout(timer));
+}
+
 async function fetchWithTimeout(url,opts,ms){
   const ac=new AbortController();
   const t=setTimeout(()=>ac.abort(),ms||45000);
@@ -444,8 +457,8 @@ async function gemini(prompt,label,want){
   if(!prov){S.fatal='No API connection.';return null;}
   let p=prompt, wasTrunc=false;
   const maxTokens=want||1600;
-  const attempts=8;
-  const deadline=Date.now()+150000;   // 2.5 minutes per stage, then report it rather than stall
+  const attempts=3;
+  const deadline=Date.now()+100000;   // checked between attempts; withDeadline is the real guard
   for(let i=1;i<=attempts;i++){
     if(S.stop)throw new Error('Stopped.');
     if(Date.now()>deadline){
@@ -467,7 +480,7 @@ async function gemini(prompt,label,want){
             }else{
         const r=await fetchWithTimeout('/api/generate',{method:'POST',
           headers:{'Content-Type':'application/json','Accept':'application/json'},
-          body:JSON.stringify({prompt:p,maxTokens})},50000);
+          body:JSON.stringify({prompt:p,maxTokens})},25000);
         const raw=await r.text();
         let d=null;try{d=JSON.parse(raw);}catch(e){
           throw Object.assign(new Error('The /api/generate route returned a web page instead of JSON, so the serverless function is not running.'),{status:0,fatal:true});}
@@ -675,7 +688,7 @@ async function doScope(){
   /* ---------- revision: one small patch call ---------- */
   if(revising){
     say('Applying your notes...');
-    const R=await gemini(qScopeRevise(c,S.scope,S.scopeNotes),'scope revision',1600);
+    const R=await withDeadline(gemini(qScopeRevise(c,S.scope,S.scopeNotes),'scope revision',1600),45000,'scope revision');
     say('Re-analyse with my notes'); btn.disabled=false;
     if(!R){
       el('scopeOut').classList.remove('hide');
@@ -704,7 +717,7 @@ async function doScope(){
 
   /* ---------- first pass: two calls ---------- */
   say('Step 1 of 2: what this service is...');
-  const A=await gemini(qScopeA(c),'scope A',1800);
+  const A=await withDeadline(gemini(qScopeA(c),'scope A',1800),45000,'scope A');
   if(!A){ say('Analyse the service'); btn.disabled=false;
     el('scopeOut').classList.remove('hide');
     el('scopeOut').innerHTML='<div class="note bad"><b>The scope call failed.</b><br><br>'
@@ -714,7 +727,7 @@ async function doScope(){
     return; }
 
   say('Step 2 of 2: the filters...');
-  const B=await gemini(qScopeB(c,A),'scope B',1200);
+  const B=await withDeadline(gemini(qScopeB(c,A),'scope B',1200),45000,'scope B');
   say('Re-analyse the service'); btn.disabled=false;
 
   const noun=c.svc.replace(/\s*(repair|service|fix|cleaning)\s*$/i,'').trim();
@@ -1209,6 +1222,7 @@ async function doRun(){
   );
 
   S.stagesTotal=tasks.length;S.stagesDone=0;metrics();
+  log('Running version: 2026-10-01 · build 12 · hard 60s stage ceiling','ok');
   log(`${tasks.length} calls queued${quick?' (quick run)':''}. Expect ${Math.ceil(tasks.length/4)} to ${Math.ceil(tasks.length/2)} minutes on a free key.`,'go');
   log('If the token meter fills, the call waits the exact time Groq asks for and then runs. Nothing is skipped.','go');
   for(let i=0;i<tasks.length;i++){
@@ -1223,11 +1237,11 @@ async function doRun(){
     el('prog').style.width=Math.round(i/tasks.length*100)+'%';
     log(`${i+1}/${tasks.length} ${label}`,'go');
     const before=S.kw;
-    let r=await gemini(mk(),label,want);
+    let r=await withDeadline(gemini(mk(),label,want),60000,label);
     if(!r&&!S.stop&&!S.fatal){
       log(`  ${label}: nothing returned, trying once more.`,'wa');
       await sleep(4000);
-      r=await gemini(mk(),label,want);
+      r=await withDeadline(gemini(mk(),label,want),45000,label);
     }
     clearInterval(tick);
     if(r){into(r);S.stagesDone=(S.stagesDone||0)+1;}
@@ -1253,7 +1267,7 @@ async function doRun(){
       el('phase').textContent=`Validating keywords — batch ${b+1} of ${batches}`;
       el('prog').style.width=Math.round(90+10*(b/batches))+'%';
       log(`Validating ${b+1}/${batches} (${slice.length} keywords)`,'go');
-      const r=await gemini(qValidate(c,slice,b*size),`validation ${b+1}`,1400);
+      const r=await withDeadline(gemini(qValidate(c,slice,b*size),`validation ${b+1}`,1400),45000,`validation ${b+1}`);
       const v=(r&&r.violations)||[];
       if(v.length)log(`  ${v.length} flagged`,'wa'); else log('  all clear','ok');
       S.violations=S.violations.concat(v);
