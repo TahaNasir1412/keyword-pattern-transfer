@@ -12,6 +12,18 @@
 
 const GROQ_BASE = 'https://api.groq.com/openai/v1';
 
+// Vercel ends a serverless function at its default limit, and a request cut off that way can leave
+// the browser waiting forever. Never wait on the provider beyond a timeout we control.
+async function fetchTimeout(url, opts, ms) {
+  const ac = new AbortController();
+  const t = setTimeout(function () { ac.abort(); }, ms || 40000);
+  try {
+    return await fetch(url, Object.assign({}, opts, { signal: ac.signal }));
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 // Groq retires models often. llama-3.3-70b-versatile was deprecated on 17 June 2026 and the
 // announced replacement is openai/gpt-oss-120b. Rather than trust any single name forever, the
 // function falls back to asking the provider what it actually serves.
@@ -25,7 +37,7 @@ const NOT_CHAT = /whisper|tts|guard|embed|vision-only|distil/i;
 
 async function discoverModel(base, key) {
   try {
-    const r = await fetch(base + '/models', { headers: { 'Authorization': 'Bearer ' + key } });
+    const r = await fetchTimeout(base + '/models', { headers: { 'Authorization': 'Bearer ' + key } }, 10000);
     if (!r.ok) return null;
     const d = await r.json();
     const ids = ((d && d.data) || []).map(function (m) { return m.id; }).filter(Boolean);
@@ -94,7 +106,7 @@ module.exports = async function handler(req, res) {
         + encodeURIComponent(model) + ':generateContent?key='
         + encodeURIComponent(process.env.GEMINI_API_KEY);
 
-      const r = await fetch(url, {
+      const r = await fetchTimeout(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -157,7 +169,7 @@ module.exports = async function handler(req, res) {
       };
       if (useJsonMode) payload.response_format = { type: 'json_object' };
       if (isReasoner) payload.reasoning_effort = 'low';
-      const rr = await fetch(base + '/chat/completions', {
+      const rr = await fetchTimeout(base + '/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
         body: JSON.stringify(payload)
@@ -230,6 +242,15 @@ module.exports = async function handler(req, res) {
     });
 
   } catch (err) {
-    return res.status(500).json({ error: String(err && err.message ? err.message : err), provider: provider });
+    const aborted = err && (err.name === 'AbortError' || /abort/i.test(String(err.message || '')));
+    return res.status(aborted ? 504 : 500).json({
+      error: aborted
+        ? 'The model did not respond within 40 seconds. The request was cancelled so the page is not left waiting.'
+        : String(err && err.message ? err.message : err),
+      provider: provider
+    });
   }
 };
+
+// Allow the function the longer execution window; set after the handler is exported.
+module.exports.config = { maxDuration: 60 };
