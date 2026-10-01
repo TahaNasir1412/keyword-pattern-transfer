@@ -344,6 +344,10 @@ function parseAll(){
     }).filter(o=>o.kw);
     if(kws.length)S.pages.push({name,kws});
   });
+  const seenKw=new Set();
+  S.pages.forEach(p=>{p.kws=p.kws.filter(k=>{const t=k.kw.toLowerCase();
+    if(seenKw.has(t))return false;seenKw.add(t);return true;});});
+  S.pages=S.pages.filter(p=>p.kws.length);
   S.parsed=S.pages.flatMap(p=>p.kws.map(k=>({...k,page:p.name})));
   return S.parsed.length;
 }
@@ -449,7 +453,7 @@ async function waitForBudget(prompt,want,label){
   while(Date.now()<until){
     if(S.stop)return;
     const left=Math.ceil((until-Date.now())/1000);
-    el('phase').textContent=`${label} — waiting ${left}s for the token budget to clear`;
+    el('phase').textContent=`${label} — resuming in ${left}s (free tier token limit, this is normal)`;
     await sleep(500);
     if(waitNeeded(need)<=0)break;      // budget freed early
   }
@@ -551,6 +555,15 @@ function ctx(){
     single:S.pages.length<2};
 }
 /* cap what we send so a huge evidence base never blows the prompt */
+/* The raw evidence is the single most expensive thing we send. Patterns needs it in full.
+   Everything downstream can work from a short digest instead. */
+function evidenceDigest(){
+  return S.pages.map(p=>{
+    const sorted=[...p.kws].sort((a,b)=>(b.vol||0)-(a.vol||0));
+    const top=sorted.slice(0,10).map(k=>k.kw+(k.vol!=null?' ('+k.vol+')':''));
+    return `${p.name}: ${p.kws.length} keywords. Top: ${top.join('; ')}`;
+  }).join('\n');
+}
 function evidenceBlock(limitPerPage=260){
   return S.pages.map(p=>{
     const sorted=[...p.kws].sort((a,b)=>(b.vol||0)-(a.vol||0));
@@ -873,8 +886,18 @@ Strip the service noun to [SERVICE] and the city to [CITY], keeping word order a
 Rank patterns by how many DIFFERENT pages each held up on, not by volume:
 tier 1 = held on 2+ services, tier 2 = one page only, tier 3 = strong on one page but collapsed on
 another (the volume belonged to that head term), tier 4 = only ever at a floor value.
-Return at most 12 patterns.${RULES}
-JSON: {"patterns":[{"pattern":"","tier":1,"sources":[""],"reasoning":""}],"provisional":${c.single},"tierNotes":""}`;}
+Return at most 12 patterns.
+
+THEN, from the same evidence, do a BLIND SPOT AUDIT. Compare the families present
+(location, colloquial, urgency, brand, symptom, type_variant, cost, decision, question, parts,
+tenure_segment, proximity, competitor_brand) against this fuller map, which adds
+maintenance_prevention, installation_replacement, warranty_insurance, emergency_after_hours,
+commercial_vs_residential, seasonal, diy_boundary.
+For each family with ZERO inherited keywords, mark "genuinely_absent" with a reason or
+"likely_blind_spot". Never default to absent just because nothing was supplied. At most 5, each
+reason under 10 words.${RULES}
+JSON: {"patterns":[{"pattern":"","tier":1,"sources":[""],"reasoning":""}],"provisional":${c.single},
+"blindSpots":[{"family":"","verdict":"likely_blind_spot","reasoning":"","autocompleteSeed":"","retrofitExisting":true}]}`;}
 
 function qCity(c){return `${HEAD(c)}
 
@@ -891,10 +914,23 @@ Per segment: the trigger that makes them search, the driver that makes them call
 section that exists for them.${SCOPE(c)}${RULES}
 JSON: {"icp":[{"segment":"","trigger":"","decisionDriver":"","sectionItNeeds":""}]}`;}
 
+function qCityIcp(c){return `${HEAD(c)}
+
+A. At most 5 conditions in ${c.city}, ${c.state} that affect ${c.svc} specifically: climate, altitude,
+water, power, housing stock and age, tenure split, student or seasonal population. One line each on
+how it changes the service. Mark each unverified with the source type needed.
+
+B. At most 4 ICP segments. Separate segments, not an average. Per segment: the trigger that makes
+them search, the driver that makes them call, and the one page section that exists for them.
+
+Keep every string under 18 words.${SCOPE(c)}${RULES}
+JSON: {"cityContext":[{"factor":"","detail":"","effectOnService":"","verification":""}],
+"icp":[{"segment":"","trigger":"","decisionDriver":"","sectionItNeeds":""}]}`;}
+
 function qFamilies(c){return `${HEAD(c)}
 
-EVIDENCE:
-${evidenceBlock(60)}
+EVIDENCE DIGEST:
+${evidenceDigest()}
 
 A. Count the supplied keywords per family: location, colloquial, urgency, brand, symptom,
 type_variant, cost, decision, question, parts, tenure_segment, proximity, competitor_brand.
@@ -921,8 +957,8 @@ JSON: {"locationKeywords":[{"keyword":"","tier":1,"sourcePattern":""}]}`;}
 
 function qTransfer(c){return `${HEAD(c)}
 
-EVIDENCE:
-${evidenceBlock(60)}
+EVIDENCE DIGEST:
+${evidenceDigest()}
 DROPPED by the operator, never reintroduce: ${c.dropped.join(', ')||'none'}
 
 MAPPING PASS ONLY. Carry across non-location concepts that ALREADY EXIST in the evidence. Every item
@@ -1017,8 +1053,8 @@ JSON: {"tiers":{"primary":"","secondary":"","tertiary":"","trafficReality":""},
 
 function qLinks(c){return `${HEAD(c)}
 
-EXISTING PAGES AND THEIR KEYWORDS:
-${evidenceBlock(50)}
+EXISTING PAGES:
+${evidenceDigest()}
 
 1. Conflicts: any keyword this new page wants that an existing page already targets. Name both, pick
 an owner, never assign one keyword twice. At most 6.
@@ -1038,11 +1074,13 @@ function qExclusions(c,blind){return `${HEAD(c)}
 BLIND SPOTS found earlier: ${JSON.stringify((blind||[]).slice(0,5)).slice(0,1100)}
 PROXIMITY policy: ${c.noNear?'all proximity keywords are banned on this page (no Business Profile)':'proximity terms kept for tracking only'}.
 
-1. Exclusions with a reason class, at most 5. Only list keywords we should NOT target. Do not list a
-   keyword here that you also expect on the page.
-2. Retrofit: gaps to add to pages ALREADY published, at most 4.${RULES}
+1. Exclusions with a reason class, at most 4. Only list keywords we should NOT target.
+2. Retrofit: gaps to add to pages ALREADY published, at most 3.
+3. Flags: at most 5 things to verify before writing, each with the claim and the source type needed.
+Keep every string under 15 words.${RULES}
 JSON: {"excluded":[{"keyword":"","reasonClass":"","reason":""}],
-"retrofit":[{"existingPage":"","whatToAdd":"","why":""}]}`;}
+"retrofit":[{"existingPage":"","whatToAdd":"","why":""}],
+"flags":[{"item":"","claim":"","verifyWith":""}]}`;}
 
 function qFlags(c){return `${HEAD(c)}
 
@@ -1156,13 +1194,11 @@ async function doRun(){
   const quick=el('quick')&&el('quick').checked;
 
   const tasks=[
-    ['Patterns',                 ()=>qPatterns(c),                      r=>S.stages.s1=r||{}, 2600],
-    ['City conditions',          ()=>qCity(c),                          r=>merge('s2',r), 2200],
-    ['Customer segments',        ()=>qIcp(c),                           r=>merge('s2',r), 2000],
-    ['Families and blind spots', ()=>qFamilies(c),                      r=>merge('s2',r), 2400],
-    ['Location keywords',        ()=>qLocation(c,S.stages.s1?.patterns),r=>merge('s3',r), 2600],
-    ['Concept transfers',        ()=>qTransfer(c),                      r=>merge('s3',r), 2400],
-    ['Brands carried over',      ()=>qBrandsMapped(c),                  r=>merge('s3',r), 2000],
+    ['Patterns and blind spots',  ()=>qPatterns(c),                      r=>{S.stages.s1=r||{};merge('s2',{blindSpots:(r&&r.blindSpots)||[]});}, 2600],
+    ['City and customer context', ()=>qCityIcp(c),                       r=>merge('s2',r), 2400],
+    ['Location keywords',         ()=>qLocation(c,S.stages.s1?.patterns),r=>merge('s3',r), 2600],
+    ['Concept transfers',         ()=>qTransfer(c),                      r=>merge('s3',r), 2200],
+    ['Brands carried over',       ()=>qBrandsMapped(c),                  r=>merge('s3',r), 1800],
   ];
   const BATCH=3;
   for(let i=0;i<c.fams.length;i+=BATCH){
@@ -1181,9 +1217,8 @@ async function doRun(){
     ['Blind: rules and local',   ()=>qRegLocal(c),                      r=>merge('s5',r), 2400],
     ['Tiers, size, summary',     ()=>qJudge(c,buildMaster().length),    r=>merge('s6',r)],
     ['Conflicts and links',      ()=>qLinks(c),                         r=>merge('s6',r)],
-    ['Entities',                ()=>qEntities(c),                          r=>merge('s6',r)],
-    ['Exclusions and retrofit', ()=>qExclusions(c,S.stages.s2?.blindSpots), r=>merge('s6',r)],
-    ['Verification flags',      ()=>qFlags(c),                             r=>merge('s6',r)],
+    ['Entities and exclusions', ()=>qEntities(c),                          r=>merge('s6',r), 2000],
+    ['Flags and retrofit',      ()=>qExclusions(c,S.stages.s2?.blindSpots), r=>merge('s6',r), 2000],
   );
 
   log(`${tasks.length} calls queued${quick?' (quick run)':''}. On a free key that is roughly ${Math.ceil(tasks.length/4)} minutes.`,'go');
